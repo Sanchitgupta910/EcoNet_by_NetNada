@@ -3,6 +3,10 @@ import { Company } from "./company.models.js"
 
 
 const branchAddressSchema = new mongoose.Schema({
+    branchName: {
+        type: String, //NetNada Australia or NetNada USA or NetNada India
+        required: true
+    },
     address: {
         type: String,
         required: true,
@@ -25,7 +29,8 @@ const branchAddressSchema = new mongoose.Schema({
     },
     associatedCompany : {
         type: mongoose.Schema.Types.ObjectId,
-        ref: Company
+        ref: Company,
+        required: true
     }
 
 }, { timestamps: true });

@@ -45,11 +45,11 @@ const registerUser = asyncHandler( async (req, res) => {
     */
 
     // Step 2: Extract user details from request body
-    const {fullName, role, phone, email, password} = req.body
+    const {fullName, role, phone, email, password, branchAddress, company} = req.body
 
     // Validate if required fields are empty
     if (
-        [fullName, email, password].some((field) => field?.trim === "")
+        [fullName, email, password, branchAddress, company].some((field) => field?.trim === "")
     )
     {
         throw new ApiError(400, "All fields is required!")
@@ -68,7 +68,9 @@ const registerUser = asyncHandler( async (req, res) => {
         role,
         phone,
         email,
-        password
+        password,
+        branchAddress,
+        company
     })
 
     // Step 5: Remove password and refreshToken from the response

@@ -13,11 +13,11 @@ const createNewCompany = asyncHandler(async (req, res) => {
     5. Ensure the entry is created
     6. Send success or error response
     */
-    console.log("something")
+    
     const { CompanyName, domain, noofEmployees } = req.body;
 
     // Validate if required fields are empty
-    if ([CompanyName, domain].some((field) => !field || field.trim() === "")) {
+    if ([CompanyName, domain].some((field) => !field || field.trim === "")) {
         throw new ApiError(400, "Company name and domain are required!");
     }
 

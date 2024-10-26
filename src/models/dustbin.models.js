@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
 import { Waste } from "./waste.models.js"
-import {Branch} from "./companyBranch.models.js"
+import { BranchAddress } from "./branchAddress.models.js"
+
 
 const dustbinSchema = new mongoose.Schema({
     dustbinType :{
@@ -17,9 +18,9 @@ const dustbinSchema = new mongoose.Schema({
         enum : [25,50,75],
         required: true
     },
-    branch : {
+    branchAddress : {
       type: mongoose.Schema.Types.ObjectId,
-      ref: Branch
+      ref: BranchAddress
     }
 
 },{timestamps:true})

@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
+import { Company } from "./company.models.js"
 
-const addressSchema = new mongoose.Schema({
+
+const branchAddressSchema = new mongoose.Schema({
     address: {
         type: String,
         required: true,
@@ -21,7 +23,11 @@ const addressSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    associatedCompany : {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: Company
+    }
 
 }, { timestamps: true });
 
-export const Address = mongoose.model("Address", addressSchema);
+export const BranchAddress = mongoose.model("BranchAddress", branchAddressSchema);

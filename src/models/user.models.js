@@ -2,10 +2,11 @@ import mongoose from "mongoose"
 import jwt from "jsonwebtoken"
 import bcrypt from "bcrypt"
 import dotenv from "dotenv";
-
+import { BranchAddress } from "./branchAddress.models.js"
+import { Company } from "./company.models.js";
 
 dotenv.config({
-    path: './src/.env'
+    path: './.env'
 })
 
 //un-comment the mongoose aggregate import when required
@@ -35,6 +36,14 @@ const userSchema = new mongoose.Schema({
     },
     refreshToken :{
         type: String
+    },
+    branchAddress: {
+        type : mongoose.Schema.Types.ObjectId,
+        ref: BranchAddress
+    },
+    company : {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: Company
     }
 },{timestamps:true})
 

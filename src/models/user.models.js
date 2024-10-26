@@ -39,11 +39,13 @@ const userSchema = new mongoose.Schema({
     },
     branchAddress: {
         type : mongoose.Schema.Types.ObjectId,
-        ref: BranchAddress
+        ref: BranchAddress,
+        required: true
     },
     company : {
         type: mongoose.Schema.Types.ObjectId,
-        ref: Company
+        ref: Company,
+        required: true
     }
 },{timestamps:true})
 

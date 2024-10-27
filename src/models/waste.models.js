@@ -1,8 +1,6 @@
 import mongoose from "mongoose"
 import { Dustbin } from "./dustbin.models.js"
 
-
-
 const wasteSchema = new mongoose.Schema({
     associateBin :{
         type: mongoose.Schema.Types.ObjectId,

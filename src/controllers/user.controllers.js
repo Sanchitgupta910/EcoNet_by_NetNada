@@ -9,11 +9,11 @@ const generateAccessandRefreshToken = async (userID) =>
     try {
         // Find user by userID
         const user = await User.findById(userID)
-        //console.log(user)
+        
         // // Generate access token and refresh token for the user
         const accessToken= user.generateAccessToken();
         const refreshToken = user.generateRefreshToken();
-        console.log(accessToken,refreshToken )
+        
         // Save the new refresh token to the user and avoid validation on other fields
         user.refreshToken= refreshToken
         await user.save({ validateBeforeSave : false})

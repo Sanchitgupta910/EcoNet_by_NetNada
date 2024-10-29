@@ -44,6 +44,43 @@ const createNewAddress = asyncHandler( async(req, res) => {
     }
 });
 
+//update branch details
+const updateBranchDetails = asyncHandler(async (req, res) => {
+    /*
+    Steps to update branch details:
+    1. Get the details from the frontend
+    2. Validate the required fields - if empty
+    3. Check if the branch already exists using the domain
+    4. Update the branch record in the DB
+    5. Ensure the entry is created
+    6. Send success or error response
+    */
+
+    const { branchName, address, city, state, postalCode, country, associatedCompany } = req.body;
+    if ([branchName, address, city, state, postalCode, country, associatedCompany].some((field) => !field || field.trim === "")) {
+        throw new ApiError(400, "All the fields are required!");
+    }
+
+    // Check if the company branch already exists in the DB using the domain
+    const existedBranch = await BranchAddress.findOne({ branchName });
+    if (!existedBranch) {
+        throw new ApiError(404, "Company branch not found");
+    }
+
+    // Update the branch record in the DB
+    const updatedBranch = await BranchAddress.findOneAndUpdate(
+        { branchName },
+        { branchName, address, city, state, postalCode, country, associatedCompany },
+        { new: true }
+    );
+
+    // Return success message along with the branch details
+    return res.status(200).json(
+        new ApiResponse(200, updatedBranch, "Company branch updated successfully")
+    )
+})
+
 export {
-    createNewAddress
+    createNewAddress,
+    updateBranchDetails
 }

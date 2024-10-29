@@ -31,6 +31,10 @@ const branchAddressSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: Company,
         required: true
+    },
+    isdeleted :{
+        type: Boolean,
+        default: false
     }
 
 }, { timestamps: true });

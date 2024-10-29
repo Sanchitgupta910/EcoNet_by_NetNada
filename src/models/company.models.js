@@ -16,6 +16,10 @@ const companySchema = new mongoose.Schema({
     noofEmployees: {
         type: Number,
     },
+    isdeleted :{
+        type: Boolean,
+        default: false
+    }
 }, { timestamps: true });
 
 export const Company = mongoose.model("Company", companySchema);

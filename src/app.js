@@ -22,6 +22,11 @@ import UserRouter from './routes/user.routes.js'
 import DustbinRouter from './routes/dustbin.routes.js'
 import WasteRoute from './routes/waste.routes.js'
 
+
+
+
+
+
 //routes declaration
 app.use("/api/v1/company", CompanyRouter) 
 app.use("/api/v1/address", AddressRouter)

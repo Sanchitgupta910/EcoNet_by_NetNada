@@ -82,6 +82,24 @@ const updateCompanyDetails = asyncHandler(async (req, res) => {
     );
 }); 
 
+//delete company by updating the isdeleted field
+const deleteCompany = asyncHandler(async (req, res) => {
+    const { domain } = req.body;
+    const existedCompany = await Company.findOne({ domain });
+    if (!existedCompany) {
+        throw new ApiError(404, "Company not found");
+    }
+    const deletedCompany = await Company.findOneAndUpdate(
+        { domain },
+        { isdeleted: true },
+        { new: true }
+    );
+    return res.status(200).json(
+        new ApiResponse(200, deletedCompany, "Company record deleted successfully")
+    );
+});
+
 export { createNewCompany,
-    updateCompanyDetails
+    updateCompanyDetails,
+    deleteCompany
  };

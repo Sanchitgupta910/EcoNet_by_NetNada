@@ -238,14 +238,15 @@ const refreshAccessToken = asyncHandler ( async(req, res) => {
 })
 
 
-//get current user
+//get current user 
 const getCurrentUser = asyncHandler(async(req, res) => {
+    const user = await User.findById(req.user._id).select("-password")
     return res.status(200).json(
-        new ApiResponse(200, req.user, "User retrieved successfully")
+        new ApiResponse(200, user, "User fetched successfully")
     )
 })
 
-//update user password
+//update user password /remove password from response
 const updateUserPassword = asyncHandler(async(req, res) => {
     const { oldPassword, newPassword } = req.body
     if(!oldPassword || !newPassword){
@@ -261,11 +262,27 @@ const updateUserPassword = asyncHandler(async(req, res) => {
     }
     user.password = newPassword
     await user.save({validateBeforeSave: false})
+    
+    // Remove password from user object before sending the response
+    user.password = undefined
+
     return res.status(200).json(
         new ApiResponse(200, {}, "Password updated successfully")
     )
 })
-    
+
+//delete user using isdeleted
+const deleteUser = asyncHandler(async(req, res) => {
+    const user = await User.findById(req.user._id)
+    if(!user){
+        throw new ApiError(404, "User not found")
+    }
+    user.isdeleted = true
+    await user.save({validateBeforeSave: false})
+    return res.status(200).json(
+        new ApiResponse(200, {}, "User deleted successfully")
+    )
+})
 
 // Export user-related controllers
 export {
@@ -274,5 +291,6 @@ export {
     logoutUser,
     refreshAccessToken,
     getCurrentUser,
-    updateUserPassword
+    updateUserPassword,
+    deleteUser
 }

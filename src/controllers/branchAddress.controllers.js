@@ -80,7 +80,25 @@ const updateBranchDetails = asyncHandler(async (req, res) => {
     )
 })
 
+//delete branch using isdeleted
+const deleteBranch = asyncHandler(async (req, res) => {
+    const { branchName } = req.body;
+    const existedBranch = await BranchAddress.findOne({ branchName });
+    if (!existedBranch) {
+        throw new ApiError(404, "Company branch not found");
+    }
+    const deletedBranch = await BranchAddress.findOneAndUpdate(
+        { branchName },
+        { isdeleted: true },
+        { new: true }
+    );
+    return res.status(200).json(
+        new ApiResponse(200, deletedBranch, "Company branch deleted successfully")
+    );
+});
+
 export {
     createNewAddress,
-    updateBranchDetails
+    updateBranchDetails,
+    deleteBranch
 }

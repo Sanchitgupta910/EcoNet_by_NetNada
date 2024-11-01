@@ -26,3 +26,13 @@ export const verifyJWT = asyncHandler(async(req, res, next) => {
         throw new ApiError(401, " Invalid Access Token.")
     }
 })
+
+//middleware to authorize user based on role
+export const authorizeRoles = (...roles) => {
+    return (req, res, next) => {
+        if(!roles.includes(req.user.role)){
+            throw new ApiError(403, "You do not have permission to perform this action.")
+        }
+        next()
+    }
+}

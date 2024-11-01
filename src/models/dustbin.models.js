@@ -10,7 +10,8 @@ const dustbinSchema = new mongoose.Schema({
     },
     currentWeight :{
         type: Number,
-        required: true
+        required: true,
+        default: 0
     },
     binCapacity :{
         type: Number,

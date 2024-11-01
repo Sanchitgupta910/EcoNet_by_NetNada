@@ -99,7 +99,32 @@ const deleteCompany = asyncHandler(async (req, res) => {
     );
 });
 
+//get company details
+const getCompany = asyncHandler(async(req, res)=>{
+    const companyDetails = await Company.find({isdeleted: false})
+    return res.status(200).json(
+        new ApiResponse(200, companyDetails, "Company details fetched successfully")
+    )
+})
+
+// //get company's address using id in the params
+// const getCompanyDetails = asyncHandler(async (req, res) => {
+//     const { _id } = req.params;
+//     const company = await Company.findById(_id)
+//     if (!company) {
+//         throw new ApiError(404, "Company not found");
+//     }
+//     return res.status(200).json(
+//         new ApiResponse(200, company, "Company details fetched successfully")
+//     )
+// })
+
+
+
 export { createNewCompany,
     updateCompanyDetails,
-    deleteCompany
+    deleteCompany,
+    getCompany,
+    //getCompanyDetails
+
  };

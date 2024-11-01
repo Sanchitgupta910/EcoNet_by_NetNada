@@ -41,4 +41,22 @@ const addDustbin = asyncHandler(async (req, res) => {
     );
 });
 
-export { addDustbin };
+//get current weight of the dustbin
+const getCurrentWeight = asyncHandler(async (req, res) => {
+    const { id } = req.params
+    const dustbin = await Dustbin.findById(id).select("currentWeight")
+    if (!dustbin) {
+        throw new ApiError(404, "Dustbin not found.")
+    }
+    return res
+    .status(200)
+    .json(
+        new ApiResponse(200, {currentWeight: dustbin.currentWeight}, "Dustbin weight fetched successfully!")  
+    )
+
+})
+
+
+export { addDustbin,
+    getCurrentWeight
+ };

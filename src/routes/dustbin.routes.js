@@ -10,4 +10,5 @@ router.route("/adddustbin").post(verifyJWT, addDustbin);
 router.route("/currentweight/:id").get(verifyJWT, getCurrentWeight);
 
 
+
 export default router

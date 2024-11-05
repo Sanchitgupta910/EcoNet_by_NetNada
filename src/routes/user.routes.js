@@ -5,6 +5,8 @@ import { verifyJWT, authorizeRoles } from "../middlewares/auth.middleware.js";
 
 const router = Router()
 
+
+//route starts with:   /api/v1/users
 router.route("/register").post(verifyJWT, authorizeRoles("SuperAdmin"), registerUser)
 router.route("/login").post(loginUser)
 

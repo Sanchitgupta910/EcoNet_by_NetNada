@@ -2,6 +2,8 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Company } from "../models/company.models.js";
+import { BranchAddress } from "../models/branchAddress.models.js";
+import { User } from "../models/user.models.js";
 
 
 //create new company
@@ -107,6 +109,36 @@ const getCompany = asyncHandler(async(req, res)=>{
     )
 })
 
+// Controller function to get a company by its ID
+const getCompanyById = asyncHandler(async (req, res) => {
+    const { id } = req.params; // Extract the ID from the request parameters
+
+    // Fetch the company details from the database using the ID
+    const company = await Company.findById(id);
+
+    // If the company is not found, throw a 404 error
+    if (!company) {
+        throw new ApiError(404, "Company not found");
+    }
+
+    // Fetch related branch addresses that reference this company
+    const branchAddresses = await BranchAddress.find({ company: id });
+
+    // Fetch related users that reference this company
+    const users = await User.find({ company: id });
+
+    // Construct the response object with company details, branch addresses, and users
+    const companyDetails = {
+        ...company.toObject(), // Convert the Mongoose document to a plain JavaScript object
+        branchAddresses,
+        users
+    };
+
+    // Return the full company details in the response
+    return res.status(200).json(
+        new ApiResponse(200, companyDetails, "Company details fetched successfully")
+    );
+});
 // //get company's address using id in the params
 // const getCompanyDetails = asyncHandler(async (req, res) => {
 //     const { _id } = req.params;
@@ -125,6 +157,7 @@ export { createNewCompany,
     updateCompanyDetails,
     deleteCompany,
     getCompany,
+    getCompanyById
     //getCompanyDetails
 
  };

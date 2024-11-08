@@ -8,7 +8,7 @@ const router = Router()
 
 router.route("/adddustbin").post(verifyJWT, addDustbin);
 router.route("/currentweight/:id").get(verifyJWT, getCurrentWeight);
-
+//router.route("/bindetails").get(verifyJWT, getCompanyWithDustbins);
 
 
 export default router

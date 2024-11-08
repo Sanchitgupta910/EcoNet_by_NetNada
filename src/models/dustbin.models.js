@@ -10,7 +10,7 @@ const dustbinSchema = new mongoose.Schema({
     },
     currentWeight :{
         type: Number,
-        //required: true,
+        
         default: 0
     },
     binCapacity :{
@@ -18,7 +18,7 @@ const dustbinSchema = new mongoose.Schema({
         enum : [25,50,75],
         required: true
     },
-    branchAddress : {
+    branchAddress : {      //asociated branch
       type: mongoose.Schema.Types.ObjectId,
       ref: BranchAddress,
       required: true

@@ -8,37 +8,44 @@ const addDustbin = asyncHandler(async (req, res) => {
     Steps to add multiple dustbins:
     1. Extract required fields from the request body
     2. Validate required fields for each dustbin
-    3. Add dustbins to the database in bulk
-    4. Return success response or error if it fails
+    3. check if bins already exist for that branch
+    4. Add dustbins to the database in bulk
+    5. Return success response or error if it fails
     */
 
-    const { dustbinType, currentWeight, binCapacity, branchAddress } = req.body;
+    const { branchName, currentWeight } = req.body;
 
-    // Validate that all fields are provided for each dustbin
-    if (
-        [dustbinType, currentWeight, binCapacity, branchAddress].some((field) => !field)
-    ) {
-        throw new ApiError(400, "All dustbin fields are required.");
+    // Validate required fields for each dustbin
+    if (!branchName || !currentWeight) {
+        throw new ApiError(400, "Both 'branchName' and 'currentWeight' are required.");
     }
-
-    // Define the 4 types of dustbins to be added
     const dustbinTypes = ['Landfill', 'Recycling', 'Paper', 'Organic'];
 
-    // Create dustbins data with each type
+    // Check if bins already exist for that branch  
+    const existingDustbin = await Dustbin.findOne({ branchName, dustbinType: { $in: dustbinTypes } });
+    if (existingDustbin.length) {
+        throw new ApiError(409, "Dustbins for this branch already exists.");
+    }
+    
+    // prepare for dn update
     const dustbinsData = dustbinTypes.map((type) => ({
         dustbinType: type,
-        currentWeight,
         binCapacity,
         branchAddress,
     }));
 
-    // Insert the dustbins in bulk to the database
-    const dustbins = await Dustbin.insertMany(dustbinsData);
+    //update db with new data using try catch
+    try {
+        const dustbins = await Dustbin.insertMany(dustbinsData);
+        return res
+        .status(201)
+        .json(
+            new ApiResponse(201, dustbins, "Dustbins added successfully!")
+        );
+    } catch (error) {
+        throw new ApiError(500, "Failed to add dustbins. Please try again.");
+    }
 
-    // Return success response with the created dustbins
-    return res.status(201).json(
-        new ApiResponse(201, dustbins, "Dustbins added successfully!")
-    );
 });
 
 //get current weight of the dustbin

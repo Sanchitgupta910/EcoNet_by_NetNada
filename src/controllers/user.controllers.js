@@ -272,17 +272,21 @@ const updateUserPassword = asyncHandler(async(req, res) => {
 })
 
 //delete user using isdeleted
-const deleteUser = asyncHandler(async(req, res) => {
-    const user = await User.findById(req.user._id)
-    if(!user){
-        throw new ApiError(404, "User not found")
+const deleteUser = asyncHandler(async (req, res) => {
+    const { userId } = req.body; // Retrieve userId from the request body
+
+    const user = await User.findById(userId); // Find the user by userId
+    if (!user) {
+        throw new ApiError(404, "User not found");
     }
-    user.isdeleted = true
-    await user.save({validateBeforeSave: false})
+    user.isdeleted = true; // Mark the user as deleted
+    await user.save({ validateBeforeSave: false });
+
     return res.status(200).json(
         new ApiResponse(200, {}, "User deleted successfully")
-    )
-})
+    );
+});
+
 
 // Export user-related controllers
 export {

@@ -110,6 +110,37 @@ const getCompany = asyncHandler(async(req, res)=>{
 })
 
 // Controller function to get a company by its ID
+// const getCompanyById = asyncHandler(async (req, res) => {
+//     const { id } = req.params; // Extract the ID from the request parameters
+
+//     // Fetch the company details from the database using the ID
+//     const company = await Company.findById(id);
+
+//     // If the company is not found, throw a 404 error
+//     if (!company) {
+//         throw new ApiError(404, "Company not found");
+//     }
+
+//     // Fetch related branch addresses that reference this company
+//     const branchAddresses = await BranchAddress.find({ associatedCompany: id });
+
+//     // Fetch related users that reference this company
+//     const users = await User.find({ company: id });
+
+//     // Construct the response object with company details, branch addresses, and users
+//     const companyDetails = {
+//         ...company.toObject(), // Convert the Mongoose document to a plain JavaScript object
+//         branchAddresses,
+//         users
+//     };
+
+//     // Return the full company details in the response
+//     return res.status(200).json(
+//         new ApiResponse(200, companyDetails, "Company details fetched successfully")
+//     );
+// });
+
+//update company controllers to fetch user and branch details as well
 const getCompanyById = asyncHandler(async (req, res) => {
     const { id } = req.params; // Extract the ID from the request parameters
 
@@ -122,34 +153,26 @@ const getCompanyById = asyncHandler(async (req, res) => {
     }
 
     // Fetch related branch addresses that reference this company
-    const branchAddresses = await BranchAddress.find({ company: id });
+    const branchAddresses = await BranchAddress.find({ associatedCompany: id });
 
-    // Fetch related users that reference this company
-    const users = await User.find({ company: id });
+    // Fetch related users that reference this company and populate their branchAddress with branchName
+    const users = await User.find({ company: id }).populate({
+        path: 'branchAddress', // The field in User model that references BranchAddress
+        select: 'branchName' // Only select branchName to include in the response
+    });
 
     // Construct the response object with company details, branch addresses, and users
     const companyDetails = {
         ...company.toObject(), // Convert the Mongoose document to a plain JavaScript object
         branchAddresses,
-        users
+        users // Users will now include branchAddress with populated branchName
     };
 
-    // Return the full company details in the response
-    return res.status(200).json(
-        new ApiResponse(200, companyDetails, "Company details fetched successfully")
-    );
+    // Return the response with company details, branch addresses, and populated user data
+    res.status(200).json(new ApiResponse(200, companyDetails, "Company details retrieved successfully"));
 });
-// //get company's address using id in the params
-// const getCompanyDetails = asyncHandler(async (req, res) => {
-//     const { _id } = req.params;
-//     const company = await Company.findById(_id)
-//     if (!company) {
-//         throw new ApiError(404, "Company not found");
-//     }
-//     return res.status(200).json(
-//         new ApiResponse(200, company, "Company details fetched successfully")
-//     )
-// })
+
+
 
 
 
@@ -158,6 +181,4 @@ export { createNewCompany,
     deleteCompany,
     getCompany,
     getCompanyById
-    //getCompanyDetails
-
  };

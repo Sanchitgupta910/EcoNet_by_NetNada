@@ -288,6 +288,35 @@ const deleteUser = asyncHandler(async (req, res) => {
 });
 
 
+
+// Get all active users (excluding deleted users)
+const getAllUser = asyncHandler(async (req, res) => {
+    // Fetch all users where isdeleted is false, and populate company and branchAddress details
+    const users = await User.find({ isdeleted: false })
+        .populate({
+            path: 'company',
+            select: 'CompanyName domain noofEmployees', // Selecting specific fields from the Company model
+            match: { isdeleted: false } // Exclude companies marked as deleted
+        })
+        .populate({
+            path: 'branchAddress',
+            select: 'branchName address city state postalCode country', // Selecting specific fields from the Address model
+            match: { isdeleted: false } // Exclude branch addresses marked as deleted
+        })
+        .select('-password -refreshToken'); // Exclude sensitive fields
+
+    // If no users are found, return an empty array
+    if (!users.length) {
+        return res.status(200).json(new ApiResponse(200, [], "No active users found."));
+    }
+
+    // Return the list of users with company and branch details
+    return res.status(200).json(
+        new ApiResponse(200, users, "Users fetched successfully.")
+    );
+});
+
+
 // Export user-related controllers
 export {
     registerUser,
@@ -296,5 +325,6 @@ export {
     refreshAccessToken,
     getCurrentUser,
     updateUserPassword,
-    deleteUser
+    deleteUser,
+    getAllUser
 }

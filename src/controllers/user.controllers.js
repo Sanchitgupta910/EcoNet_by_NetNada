@@ -103,15 +103,11 @@ const loginUser = asyncHandler(async (req, res) => {
     */
 
     // Step 1: Get email and password from request body
-    const {email, password} = req.body
+    const {email, password, rememberMe } = req.body
 
     // Step 2: Validate that email is provided
-    if(!email){
-        throw new ApiError(400, "Email is required.")
-    }
-
-    if(!password){
-        throw new ApiError(400, "Password is required.")
+    if(!email || !password){
+        throw new ApiError(400, "Email and password are required.")
     }
 
     // Step 3: Find user by email
@@ -136,7 +132,8 @@ const loginUser = asyncHandler(async (req, res) => {
     // Set options for secure cookies
     const options = {
         httpOnly : true,
-        secure : true
+        secure : true,
+        maxAge: rememberMe ? 1000 * 60 * 60 * 24 * 30 : 1000 * 60 * 60
     }
 
     // Step 6: Send tokens and logged-in user data in the response

@@ -130,9 +130,10 @@ const loginUser = asyncHandler(async (req, res) => {
     const loggedUser = await User.findById(user._id).select("-password -refreshToken")
 
     // Set options for secure cookies
+    const isProduction = process.env.NODE_ENV === "production";
     const options = {
         httpOnly : true,
-        secure : true,
+        secure : isProduction,
         maxAge: rememberMe ? 1000 * 60 * 60 * 24 * 30 : 1000 * 60 * 60
     }
 
@@ -172,8 +173,10 @@ const logoutUser = asyncHandler(async(req, res) => {
     // Options for clearing cookies securely
     const options = {
         httpOnly : true,
-        secure : true
-    }
+        secure : process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/"
+    };
 
     // Clear accessToken and refreshToken cookies
     return res
@@ -188,7 +191,7 @@ const logoutUser = asyncHandler(async(req, res) => {
 
 //refreshing access token
 const refreshAccessToken = asyncHandler ( async(req, res) => {
-    const incomingRefreshToken = req.cookie.refreshToken
+    const incomingRefreshToken = req.cookie?.refreshToken
 
     if(!incomingRefreshToken){
         throw new ApiError(401, "Unauthorized request.")

@@ -239,32 +239,44 @@ const refreshAccessToken = asyncHandler ( async(req, res) => {
 })
 
 
-//get current user 
-const getCurrentUser = asyncHandler(async(req, res) => {
-    const user = await User.findById(req.user._id)
-    .populate("company")
-    .populate("branchAddress")
-    .select("-password")
-
-    if(!user){
-        throw new ApiError(404, "User not found")
+/**
+ * getCurrentUser
+ * Fetches the current user (excluding the password) and attempts to populate
+ * the company and branchAddress fields. Additionally, if the user is linked to a company,
+ * it fetches all branch addresses associated with that company and attaches them
+ * to the company object.
+ *
+ * If the user is not linked to any company (e.g., superadmin created before a company was set up),
+ * then no branch addresses are fetched.
+ */ 
+const getCurrentUser = asyncHandler(async (req, res) => {
+    // Find the user by ID, populate the 'company' and 'branchAddress' fields, and exclude the password.
+    let user = await User.findById(req.user._id)
+      .populate("company")
+      .populate("branchAddress")
+      .select("-password");
+  
+    if (!user) {
+      throw new ApiError(404, "User not found");
     }
-
-    //fetch all branches of the user's company
-    const branchAddresses = await BranchAddress.find({associatedCompany: user.company._id, isdeleted: false})
-
-    // convert mongosse doc into plain js object
-    const userObj = user.toObject()
-
-    //attach branch object to comapany object
-    userObj.company.branchAddresses = branchAddresses;
-
-
-    //return updated object
+  
+    // Convert the Mongoose document to a plain JavaScript object for modification.
+    const userObj = user.toObject();
+  
+    // If the user is linked to a company, fetch all branch addresses for that company.
+    if (userObj.company && userObj.company._id) {
+      const branchAddresses = await BranchAddress.find({
+        associatedCompany: userObj.company._id,
+        isdeleted: false,
+      });
+      // Attach the branch addresses to the company object.
+      userObj.company.branchAddresses = branchAddresses;
+    }
+  
     return res.status(200).json(
-        new ApiResponse(200, userObj, "User fetched successfully")
-    )
-})
+      new ApiResponse(200, userObj, "User fetched successfully")
+    );
+  });
 
 //update user password /remove password from response
 const updateUserPassword = asyncHandler(async(req, res) => {

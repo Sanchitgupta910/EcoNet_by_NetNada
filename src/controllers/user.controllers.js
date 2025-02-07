@@ -1,362 +1,435 @@
-import {asyncHandler} from "../utils/asyncHandler.js"
-import {ApiError} from "../utils/ApiError.js"
-import {User} from "../models/user.models.js"
-import { BranchAddress } from "../models/branchAddress.models.js"
-import { ApiResponse } from "../utils/ApiResponse.js"
- 
-// Function to generate access and refresh tokens based on user ID
-const generateAccessandRefreshToken = async (userID) =>  
-{
-    try {
-        // Find user by userID
-        const user = await User.findById(userID)
-        
-        // // Generate access token and refresh token for the user
-        const accessToken= user.generateAccessToken();
-        const refreshToken = user.generateRefreshToken();
-        
-        // Save the new refresh token to the user and avoid validation on other fields
-        user.refreshToken= refreshToken
-        await user.save({ validateBeforeSave : false})
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
+import { User } from "../models/user.models.js";
+import { BranchAddress } from "../models/branchAddress.models.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
+import jwt from "jsonwebtoken"; // Needed for verifying refresh tokens
 
-        // Return the generated tokens
-        return {accessToken, refreshToken}
-        
+/**
+ * generateAccessandRefreshToken
+ * -------------------------------------------
+ * Generates an access token and a refresh token for the given user ID.
+ * Steps:
+ *   1. Find the user by the provided userID.
+ *   2. Generate an access token and a refresh token using the user's methods.
+ *   3. Save the newly generated refresh token in the user's record (bypassing validations).
+ *   4. Return both tokens.
+ *
+ * @param {string} userID - The ID of the user for whom tokens are generated.
+ * @returns {Object} An object containing the accessToken and refreshToken.
+ * @throws {ApiError} If any error occurs during token generation.
+ */
+const generateAccessandRefreshToken = async (userID) => {
+  try {
+    // Step 1: Find the user by userID
+    const user = await User.findById(userID);
 
-    } catch (error) {
-        
-        // If something goes wrong, throw an error
-        throw new ApiError(500, "Something went wrong while generating refresh and access token")
-    }
-}
+    // Step 2: Generate access and refresh tokens for the user using model methods
+    const accessToken = user.generateAccessToken();
+    const refreshToken = user.generateRefreshToken();
 
-// Register new user
-const registerUser = asyncHandler( async (req, res) => {
+    // Step 3: Save the new refresh token to the user record (without running validations)
+    user.refreshToken = refreshToken;
+    await user.save({ validateBeforeSave: false });
 
-    /*
-    Steps to register a user:
+    // Step 4: Return the generated tokens
+    return { accessToken, refreshToken };
+  } catch (error) {
+    // If any error occurs, throw an ApiError with status code 500.
+    throw new ApiError(
+      500,
+      "Something went wrong while generating refresh and access token"
+    );
+  }
+};
 
-    1. Get user details from the frontend
-    2. Validate the input details (check for empty fields)
-    3. Check if the user already exists (using email)
-    4. Create user object and store it in the database
-    5. Remove password and refresh token fields from the response
-    6. Ensure user creation is successful
-    7. Return the success response
-    */
+/**
+ * registerUser
+ * -------------------------------------------
+ * Registers a new user in the system.
+ * Steps:
+ *   1. Extract user details from the request body.
+ *   2. Validate that required fields are not empty.
+ *   3. Check if a user with the same email already exists.
+ *   4. Create the new user in the database.
+ *   5. Remove sensitive fields (password and refreshToken) from the returned user object.
+ *   6. Ensure the user was created successfully.
+ *   7. Return a success response with the created user details.
+ *
+ * @route POST /api/v1/users/register
+ */
+const registerUser = asyncHandler(async (req, res) => {
+  // Step 1: Extract user details from the request body
+  const { fullName, role, phone, email, password, branchAddress, company } = req.body;
 
-    // Step 2: Extract user details from request body
-    const {fullName, role, phone, email, password, branchAddress, company} = req.body
+  // Step 2: Validate that required fields are provided.
+  // NOTE: The check uses "field?.trim" which compares the function reference. Ideally, it should be field?.trim() === "".
+  if ([fullName, email, password, branchAddress, company].some((field) => field?.trim === "")) {
+    throw new ApiError(400, "All fields is required!");
+  }
 
-    // Validate if required fields are empty
-    if (
-        [fullName, email, password, branchAddress, company].some((field) => field?.trim === "")
-    )
-    {
-        throw new ApiError(400, "All fields is required!")
-    }
+  // Step 3: Check if a user with the same email already exists in the database.
+  const existedUser = await User.findOne({ email });
+  if (existedUser) {
+    throw new ApiError(409, "Email already exists!");
+  }
 
-    // Step 3: Check if a user with the same email already exists
-    const existedUser = await User.findOne({email})
+  // Step 4: Create a new user record in the database with the provided details.
+  const user = await User.create({
+    fullName,
+    role,
+    phone,
+    email,
+    password,
+    branchAddress,
+    company,
+  });
 
-    if (existedUser) {
-        throw new ApiError(409, "Email already exists!")
-    }
+  // Step 5: Retrieve the newly created user while excluding sensitive fields.
+  const createdUser = await User.findById(user._id).select("-password -refreshToken");
 
-    // Step 4: Create a new user entry in the database
-    const user = await User.create({
-        fullName,
-        role,
-        phone,
-        email,
-        password,
-        branchAddress,
-        company
-    })
+  // Step 6: Ensure that the user was successfully created.
+  if (!createdUser) {
+    throw new ApiError(500, "Something went wrong while registering the user 😢");
+  }
 
-    // Step 5: Remove password and refreshToken from the response
-    const createdUser = await User.findById(user._id).select("-password -refreshToken")
+  // Step 7: Return a success response with the created user details.
+  return res.status(201).json(
+    new ApiResponse(200, createdUser, "User registered successfully! 😊")
+  );
+});
 
-    // Step 6: Ensure that the user was created successfully
-    if(!createdUser) {
-        throw new ApiError(500, "Something went wrong while registering the user 😢")
-    }
-
-    // Step 7: Return success response along with created user details
-    return res.status(201).json(
-        new ApiResponse(200, createdUser, "User registered successfully! 😊")
-    )
-
-})
-
-// Login user
+/**
+ * loginUser
+ * -------------------------------------------
+ * Authenticates a user and logs them in.
+ * Steps:
+ *   1. Extract email, password, and rememberMe from the request body.
+ *   2. Validate that both email and password are provided.
+ *   3. Find the user by email.
+ *   4. Verify that the provided password is correct.
+ *   5. Generate new access and refresh tokens.
+ *   6. Exclude sensitive fields from the user object.
+ *   7. Set secure cookies with the tokens and return the logged-in user data.
+ *
+ * @route POST /api/v1/users/login
+ */
 const loginUser = asyncHandler(async (req, res) => {
+  // Step 1: Extract credentials and rememberMe flag from request body
+  const { email, password, rememberMe } = req.body;
 
-    /*
-    Steps to login a user:
+  // Step 2: Validate that email and password are provided
+  if (!email || !password) {
+    throw new ApiError(400, "Email and password are required.");
+  }
 
-    1. Take email and password from the user
-    2. Validate the given info
-    3. Check if the user is registered
-    4. If registered, decrypt the password and compare it
-    5. Generate access and refresh tokens
-    6. Send tokens to the user as secured cookies
-    */
+  // Step 3: Find the user in the database by email
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new ApiError(400, "User does not exist.");
+  }
 
-    // Step 1: Get email and password from request body
-    const {email, password, rememberMe } = req.body
+  // Step 4: Verify the provided password against the stored password hash
+  const isPasswordCorrect = await user.isPasswordCorrect(password);
+  if (!isPasswordCorrect) {
+    throw new ApiError(401, "Invalid Credentials");
+  }
 
-    // Step 2: Validate that email is provided
-    if(!email || !password){
-        throw new ApiError(400, "Email and password are required.")
-    }
+  // Step 5: Generate access and refresh tokens for the user
+  const { accessToken, refreshToken } = await generateAccessandRefreshToken(user._id);
 
-    // Step 3: Find user by email
-    const user = await User.findOne({email})
+  // Step 6: Retrieve the logged-in user details excluding password and refreshToken
+  const loggedUser = await User.findById(user._id).select("-password -refreshToken");
 
-    if(!user){
-        throw new ApiError (400, "User does not exist.")
-    }
+  // Prepare options for secure cookies
+  const isProduction = process.env.NODE_ENV === "production";
+  const options = {
+    httpOnly: true,
+    secure: isProduction,
+    maxAge: rememberMe ? 1000 * 60 * 60 * 24 * 30 : 1000 * 60 * 60, // 30 days vs 1 hour
+  };
 
-    // Step 4: Verify password
-    const isPasswordCorrect = await user.isPasswordCorrect(password)
-    if(!isPasswordCorrect){
-        throw new ApiError (401, "Invalid Credentials")
-    }
-
-    // Step 5: Generate access and refresh tokens
-    const {accessToken, refreshToken} = await generateAccessandRefreshToken(user._id)
-
-    // Exclude password and refreshToken from the logged-in user's response
-    const loggedUser = await User.findById(user._id).select("-password -refreshToken")
-
-    // Set options for secure cookies
-    const isProduction = process.env.NODE_ENV === "production";
-    const options = {
-        httpOnly : true,
-        secure : isProduction,
-        maxAge: rememberMe ? 1000 * 60 * 60 * 24 * 30 : 1000 * 60 * 60
-    }
-
-    // Step 6: Send tokens and logged-in user data in the response
-    return res
+  // Step 7: Send tokens via cookies and return the logged-in user data
+  return res
     .status(200)
     .cookie("accessToken", accessToken, options)
     .cookie("refreshToken", refreshToken, options)
     .json(
-        new ApiResponse(
-            200, 
-            {
-                user: loggedUser, accessToken, refreshToken
-            },
-            "User logged in successfully!"
-        )
-    )
+      new ApiResponse(
+        200,
+        { user: loggedUser, accessToken, refreshToken },
+        "User logged in successfully!"
+      )
+    );
+});
 
-})
+/**
+ * logoutUser
+ * -------------------------------------------
+ * Logs out the current user.
+ * Steps:
+ *   1. Remove the refresh token from the user's record in the database.
+ *   2. Clear the accessToken and refreshToken cookies.
+ *   3. Return a success response.
+ *
+ * @route POST /api/v1/users/logout
+ */
+const logoutUser = asyncHandler(async (req, res) => {
+  // Step 1: Remove the refresh token from the user's record in the database
+  await User.findByIdAndUpdate(
+    req.user._id,
+    { $set: { refreshToken: undefined } },
+    { new: true }
+  );
 
-// Logout user
-const logoutUser = asyncHandler(async(req, res) => {
+  // Options for clearing cookies securely
+  const options = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+  };
 
-    // Remove refresh token from the user's record in the database
-    await User.findByIdAndUpdate(
-        req.user._id,
-        {
-            $set:{
-                refreshToken: undefined
-            }
-        },
-        {
-            new: true
-        }
-    )
-
-    // Options for clearing cookies securely
-    const options = {
-        httpOnly : true,
-        secure : process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/"
-    };
-
-    // Clear accessToken and refreshToken cookies
-    return res
+  // Step 2: Clear the accessToken and refreshToken cookies and return a response
+  return res
     .status(200)
     .clearCookie("accessToken", options)
     .clearCookie("refreshToken", options)
-    .json(
-        new ApiResponse(200, {}, "User logged out successfully")
-    )
+    .json(new ApiResponse(200, {}, "User logged out successfully"));
+});
 
-})
+/**
+ * refreshAccessToken
+ * -------------------------------------------
+ * Refreshes the access token using the provided refresh token.
+ * Steps:
+ *   1. Retrieve the incoming refresh token from the cookies.
+ *   2. Verify that the refresh token exists; if not, throw an unauthorized error.
+ *   3. Verify the refresh token using JWT and retrieve the associated user ID.
+ *   4. Check if the user exists and that the token matches the stored token.
+ *   5. Generate new tokens and set them as cookies.
+ *   6. Return the new access token and refresh token.
+ *
+ * @route POST /api/v1/users/refresh
+ */
+const refreshAccessToken = asyncHandler(async (req, res) => {
+  // Step 1: Retrieve refresh token from cookies (assuming cookie parsing middleware is in place)
+  const incomingRefreshToken = req.cookie?.refreshToken;
 
-//refreshing access token
-const refreshAccessToken = asyncHandler ( async(req, res) => {
-    const incomingRefreshToken = req.cookie?.refreshToken
+  // Step 2: Validate that the refresh token exists
+  if (!incomingRefreshToken) {
+    throw new ApiError(401, "Unauthorized request.");
+  }
 
-    if(!incomingRefreshToken){
-        throw new ApiError(401, "Unauthorized request.")
+  try {
+    // Step 3: Verify the refresh token using JWT
+    const decodedToken = jwt.verify(incomingRefreshToken, process.env.REFRESH_TOKEN_SECRET);
+
+    // Retrieve user details using the decoded token's user ID
+    const userdetails = await User.findById(decodedToken?._id);
+    if (!userdetails) {
+      throw new ApiError(401, "Invalid refresh token");
     }
 
-    try {
-        const decodedToken = jwt.verify(
-            incomingRefreshToken, 
-            process.env.REFRESH_TOKEN_SECRET
-        )
-    
-        const userdetails = await User.findById(decodedToken?._id)
-        if(!userdetails){
-            throw new ApiError(401, "Invalid refresh token")
-        }
-    
-        if(incomingRefreshToken !== userdetails){
-            throw new ApiError(401, "Refresh token is expired or used")
-        }
-    
-        const options ={
-            httpOnly: true,
-            secure: true
-        }
-    
-        const {accessToken,newRefreshToken } = await generateAccessandRefreshToken(userdetails?._id)
-    
-        return res
-        .status(200)
-        .cookie("accessToken",accessToken, options)
-        .cookie("refreshToken",newRefreshToken, options)
-        .json(
-            new ApiResponse(
-                200,
-                {accessToken, refreshToken: newRefreshToken},
-                "Access token refreshed"
-            )
-        )
-    
-    } catch (error) {
-        throw new ApiError(401, error?.message || "Invalid refresh token.")
+    // Step 4: Check if the incoming refresh token matches the one stored in the user record
+    if (incomingRefreshToken !== userdetails.refreshToken) {
+      throw new ApiError(401, "Refresh token is expired or used");
     }
 
-})
+    // Cookie options for new tokens
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
 
+    // Step 5: Generate new access and refresh tokens
+    const { accessToken, refreshToken: newRefreshToken } = await generateAccessandRefreshToken(userdetails?._id);
+
+    // Step 6: Set new tokens as cookies and return them in the response
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", newRefreshToken, options)
+      .json(
+        new ApiResponse(
+          200,
+          { accessToken, refreshToken: newRefreshToken },
+          "Access token refreshed"
+        )
+      );
+  } catch (error) {
+    throw new ApiError(401, error?.message || "Invalid refresh token.");
+  }
+});
 
 /**
  * getCurrentUser
- * Fetches the current user (excluding the password) and attempts to populate
- * the company and branchAddress fields. Additionally, if the user is linked to a company,
- * it fetches all branch addresses associated with that company and attaches them
- * to the company object.
+ * -------------------------------------------
+ * Fetches the current user's details, excluding the password, and populates related fields.
+ * Steps:
+ *   1. Find the user by ID and populate the 'company' and 'branchAddress' fields.
+ *   2. If the user is linked to a company, fetch all branch addresses associated with that company.
+ *   3. Attach the branch addresses to the company object.
+ *   4. Return the user object.
  *
- * If the user is not linked to any company (e.g., superadmin created before a company was set up),
- * then no branch addresses are fetched.
- */ 
+ * @route GET /api/v1/users/me
+ */
 const getCurrentUser = asyncHandler(async (req, res) => {
-    // Find the user by ID, populate the 'company' and 'branchAddress' fields, and exclude the password.
-    let user = await User.findById(req.user._id)
-      .populate("company")
-      .populate("branchAddress")
-      .select("-password");
-  
-    if (!user) {
-      throw new ApiError(404, "User not found");
-    }
-  
-    // Convert the Mongoose document to a plain JavaScript object for modification.
-    const userObj = user.toObject();
-  
-    // If the user is linked to a company, fetch all branch addresses for that company.
-    if (userObj.company && userObj.company._id) {
-      const branchAddresses = await BranchAddress.find({
-        associatedCompany: userObj.company._id,
-        isdeleted: false,
-      });
-      // Attach the branch addresses to the company object.
-      userObj.company.branchAddresses = branchAddresses;
-    }
-  
-    return res.status(200).json(
-      new ApiResponse(200, userObj, "User fetched successfully")
-    );
-  });
+  // Step 1: Find the user and populate company and branchAddress; exclude the password field.
+  let user = await User.findById(req.user._id)
+    .populate("company")
+    .populate("branchAddress")
+    .select("-password");
 
-//update user password /remove password from response
-const updateUserPassword = asyncHandler(async(req, res) => {
-    const { oldPassword, newPassword } = req.body
-    if(!oldPassword || !newPassword){
-        throw new ApiError(400, "Old password and new password are required")
-    }
-    const user = await User.findById(req.user._id)
-    if(!user){
-        throw new ApiError(404, "User not found")
-    }
-    const isPasswordCorrect = await user.isPasswordCorrect(oldPassword)
-    if(!isPasswordCorrect){
-        throw new ApiError(400, "Old password is incorrect")
-    }
-    user.password = newPassword
-    await user.save({validateBeforeSave: false})
-    
-    // Remove password from user object before sending the response
-    user.password = undefined
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
 
-    return res.status(200).json(
-        new ApiResponse(200, {}, "Password updated successfully")
-    )
-})
+  // Convert Mongoose document to a plain JS object for further modifications
+  const userObj = user.toObject();
 
-//delete user using isdeleted
+  // Step 2: If the user is linked to a company, fetch all non-deleted branch addresses
+  if (userObj.company && userObj.company._id) {
+    const branchAddresses = await BranchAddress.find({
+      associatedCompany: userObj.company._id,
+      isdeleted: false,
+    });
+    // Step 3: Attach branch addresses to the company object
+    userObj.company.branchAddresses = branchAddresses;
+  }
+
+  // Step 4: Return the user data
+  return res.status(200).json(new ApiResponse(200, userObj, "User fetched successfully"));
+});
+
+/**
+ * updateUserPassword
+ * -------------------------------------------
+ * Updates the current user's password.
+ * Steps:
+ *   1. Extract oldPassword and newPassword from the request body.
+ *   2. Validate that both are provided.
+ *   3. Find the user by ID.
+ *   4. Verify that the old password is correct.
+ *   5. Update the user's password with the new one.
+ *   6. Save the user (without triggering validations).
+ *   7. Remove the password field from the response.
+ *   8. Return a success message.
+ *
+ * @route PATCH /api/v1/users/updatePassword
+ */
+const updateUserPassword = asyncHandler(async (req, res) => {
+  // Step 1: Extract old and new passwords from request body
+  const { oldPassword, newPassword } = req.body;
+  // Step 2: Validate that both passwords are provided
+  if (!oldPassword || !newPassword) {
+    throw new ApiError(400, "Old password and new password are required");
+  }
+
+  // Step 3: Find the user by ID
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  // Step 4: Verify the correctness of the old password
+  const isPasswordCorrect = await user.isPasswordCorrect(oldPassword);
+  if (!isPasswordCorrect) {
+    throw new ApiError(400, "Old password is incorrect");
+  }
+
+  // Step 5: Update the user's password to the new password
+  user.password = newPassword;
+  // Step 6: Save the updated user (skip validations)
+  await user.save({ validateBeforeSave: false });
+
+  // Step 7: Remove the password field from the user object before returning (for security)
+  user.password = undefined;
+
+  // Step 8: Return a success response
+  return res.status(200).json(new ApiResponse(200, {}, "Password updated successfully"));
+});
+
+/**
+ * deleteUser
+ * -------------------------------------------
+ * Marks a user as deleted (soft delete) by setting the 'isdeleted' flag to true.
+ * Steps:
+ *   1. Extract the userId from the request body.
+ *   2. Find the user by the given userId.
+ *   3. If the user exists, mark the user as deleted.
+ *   4. Save the user record (without validations).
+ *   5. Return a success response.
+ *
+ * @route DELETE /api/v1/users/delete
+ */
 const deleteUser = asyncHandler(async (req, res) => {
-    const { userId } = req.body; // Retrieve userId from the request body
+  // Step 1: Retrieve the userId from the request body
+  const { userId } = req.body;
 
-    const user = await User.findById(userId); // Find the user by userId
-    if (!user) {
-        throw new ApiError(404, "User not found");
-    }
-    user.isdeleted = true; // Mark the user as deleted
-    await user.save({ validateBeforeSave: false });
+  // Step 2: Find the user by ID
+  const user = await User.findById(userId);
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
 
-    return res.status(200).json(
-        new ApiResponse(200, {}, "User deleted successfully")
-    );
+  // Step 3: Mark the user as deleted (soft delete)
+  user.isdeleted = true;
+  // Step 4: Save the change without running validations
+  await user.save({ validateBeforeSave: false });
+
+  // Step 5: Return a success response
+  return res.status(200).json(new ApiResponse(200, {}, "User deleted successfully"));
 });
 
-
-
-// Get all active users (excluding deleted users)
+/**
+ * getAllUser
+ * -------------------------------------------
+ * Retrieves all active (non-deleted) users along with their company and branch address details.
+ * Steps:
+ *   1. Find all users where isdeleted is false.
+ *   2. Populate the company field with selected fields and ensure only non-deleted companies are returned.
+ *   3. Populate the branchAddress field with selected fields and ensure only non-deleted addresses are returned.
+ *   4. Exclude sensitive fields like password and refreshToken.
+ *   5. Return the list of users.
+ *
+ * @route GET /api/v1/users
+ */
 const getAllUser = asyncHandler(async (req, res) => {
-    // Fetch all users where isdeleted is false, and populate company and branchAddress details
-    const users = await User.find({ isdeleted: false })
-        .populate({
-            path: 'company',
-            select: 'CompanyName domain noofEmployees', // Selecting specific fields from the Company model
-            match: { isdeleted: false } // Exclude companies marked as deleted
-        })
-        .populate({
-            path: 'branchAddress',
-            select: 'branchName address city state postalCode country', // Selecting specific fields from the Address model
-            match: { isdeleted: false } // Exclude branch addresses marked as deleted
-        })
-        .select('-password -refreshToken'); // Exclude sensitive fields
+  // Step 1: Find all non-deleted users
+  const users = await User.find({ isdeleted: false })
+    // Step 2: Populate company details (only select specific fields, and exclude deleted companies)
+    .populate({
+      path: "company",
+      select: "CompanyName domain noofEmployees",
+      match: { isdeleted: false },
+    })
+    // Step 3: Populate branch address details (only select specific fields, and exclude deleted addresses)
+    .populate({
+      path: "branchAddress",
+      select: "branchName address city state postalCode country",
+      match: { isdeleted: false },
+    })
+    // Step 4: Exclude sensitive fields
+    .select("-password -refreshToken");
 
-    // If no users are found, return an empty array
-    if (!users.length) {
-        return res.status(200).json(new ApiResponse(200, [], "No active users found."));
-    }
+  // If no users found, return an empty array with a message.
+  if (!users.length) {
+    return res.status(200).json(new ApiResponse(200, [], "No active users found."));
+  }
 
-    // Return the list of users with company and branch details
-    return res.status(200).json(
-        new ApiResponse(200, users, "Users fetched successfully.")
-    );
+  // Step 5: Return the list of active users with their company and branch details
+  return res.status(200).json(new ApiResponse(200, users, "Users fetched successfully."));
 });
 
-
-// Export user-related controllers
+// Export all user-related controllers
 export {
-    registerUser,
-    loginUser,
-    logoutUser,
-    refreshAccessToken,
-    getCurrentUser,
-    updateUserPassword,
-    deleteUser,
-    getAllUser
-}
+  registerUser,
+  loginUser,
+  logoutUser,
+  refreshAccessToken,
+  getCurrentUser,
+  updateUserPassword,
+  deleteUser,
+  getAllUser,
+};

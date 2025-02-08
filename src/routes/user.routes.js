@@ -1,5 +1,5 @@
 import {Router} from "express";
-import { registerUser, loginUser, logoutUser, refreshAccessToken, getCurrentUser, updateUserPassword, deleteUser, getAllUser } from "../controllers/user.controllers.js";
+import { registerUser, loginUser, logoutUser, refreshAccessToken, getCurrentUser, updateUserPassword, deleteUser, getAllUser, getUserByEmail } from "../controllers/user.controllers.js";
 import { verifyJWT, authorizeRoles } from "../middlewares/auth.middleware.js";
 
 
@@ -16,6 +16,7 @@ router.route("/logout").post(verifyJWT, logoutUser)
 router.route('/refresh-token').post(refreshAccessToken)
 router.route("/me").get(verifyJWT, getCurrentUser)
 router.route("/updatepassword").post(verifyJWT, updateUserPassword)
+router.route("/byEmail").get(getUserByEmail)
 router.route("/all-users").get(verifyJWT, authorizeRoles("SuperAdmin"), getAllUser)
 router.route("/deleteuser").post(verifyJWT, authorizeRoles("SuperAdmin"), deleteUser)
 

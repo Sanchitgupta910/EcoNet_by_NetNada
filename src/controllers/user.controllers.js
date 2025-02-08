@@ -303,6 +303,57 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 });
 
 /**
+ * getUserByEmail
+ * -------------------------------------------
+ * Fetches a user's details by email, excluding the password, and populates related fields.
+ * Steps:
+ *   1. Extract the email from the query parameters.
+ *   2. Validate that the email is provided.
+ *   3. Find the user by email and populate the 'company' and 'branchAddress' fields.
+ *   4. If the user is linked to a company, fetch all branch addresses associated with that company.
+ *   5. Attach the branch addresses to the company object.
+ *   6. Return the user object.
+ *
+ * @route GET /api/v1/users/byEmail
+ */
+const getUserByEmail = asyncHandler(async (req, res) => {
+  // Step 1: Extract email from query parameters
+  const { email } = req.query;
+  console.log("[getUserByEmail] Received email:", email); // Debug log
+
+  if (!email) {
+    throw new ApiError(400, "Email is required");
+  }
+
+  // Step 2: Find the user by email and populate related fields
+  let user = await User.findOne({ email })
+    .populate("company")
+    .populate("branchAddress")
+    .select("-password -refreshToken");
+    console.log("[getUserByEmail] User found:", user); // Debug log
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  // Step 3: Convert document to plain JS object
+  const userObj = user.toObject();
+
+  // Step 4: If the user is linked to a company, fetch all non-deleted branch addresses
+  if (userObj.company && userObj.company._id) {
+    const branchAddresses = await BranchAddress.find({
+      associatedCompany: userObj.company._id,
+      isdeleted: false,
+    });
+    // Attach branch addresses to the company object
+    userObj.company.branchAddresses = branchAddresses;
+  }
+
+  // Step 5: Return the fetched user data
+  return res.status(200).json(new ApiResponse(200, userObj, "User fetched successfully by email"));
+});
+
+/**
  * updateUserPassword
  * -------------------------------------------
  * Updates the current user's password.
@@ -429,6 +480,7 @@ export {
   logoutUser,
   refreshAccessToken,
   getCurrentUser,
+  getUserByEmail,
   updateUserPassword,
   deleteUser,
   getAllUser,

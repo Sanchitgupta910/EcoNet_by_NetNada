@@ -109,8 +109,11 @@ const registerUser = asyncHandler(async (req, res) => {
  *   3. Find the user by email.
  *   4. Verify that the provided password is correct.
  *   5. Generate new access and refresh tokens.
- *   6. Exclude sensitive fields from the user object.
- *   7. Set secure cookies with the tokens and return the logged-in user data.
+ *   6. Retrieve the logged-in user details (populating company and branchAddress fields),
+ *      then convert the Mongoose document to a plain JavaScript object.
+ *   7. If the user is linked to a company, fetch all non-deleted branch addresses for that company
+ *      and attach them to the company object.
+ *   8. Set secure cookies with the tokens and return the fully populated user data.
  *
  * @route POST /api/v1/users/login
  */
@@ -138,10 +141,26 @@ const loginUser = asyncHandler(async (req, res) => {
   // Step 5: Generate access and refresh tokens for the user
   const { accessToken, refreshToken } = await generateAccessandRefreshToken(user._id);
 
-  // Step 6: Retrieve the logged-in user details excluding password and refreshToken
-  const loggedUser = await User.findById(user._id).select("-password -refreshToken");
+  // Step 6: Retrieve the logged-in user details, populating company and branchAddress fields
+  let loggedUser = await User.findById(user._id)
+    .populate("company")
+    .populate("branchAddress")
+    .select("-password -refreshToken");
 
-  // Prepare options for secure cookies
+  // Convert the Mongoose document to a plain JavaScript object.
+  loggedUser = loggedUser.toObject();
+
+  // Step 7: If the user is linked to a company, fetch all non-deleted branch addresses for that company.
+  if (loggedUser.company && loggedUser.company._id) {
+    const branchAddresses = await BranchAddress.find({
+      associatedCompany: loggedUser.company._id,
+      isdeleted: false,
+    });
+    // Attach the branch addresses array to the company object.
+    loggedUser.company.branchAddresses = branchAddresses;
+  }
+
+  // Step 8: Prepare options for secure cookies.
   const isProduction = process.env.NODE_ENV === "production";
   const options = {
     httpOnly: true,
@@ -149,7 +168,7 @@ const loginUser = asyncHandler(async (req, res) => {
     maxAge: rememberMe ? 1000 * 60 * 60 * 24 * 30 : 1000 * 60 * 60, // 30 days vs 1 hour
   };
 
-  // Step 7: Send tokens via cookies and return the logged-in user data
+  // Step 9: Send tokens via cookies and return the fully populated logged-in user data.
   return res
     .status(200)
     .cookie("accessToken", accessToken, options)
@@ -162,6 +181,7 @@ const loginUser = asyncHandler(async (req, res) => {
       )
     );
 });
+
 
 /**
  * logoutUser

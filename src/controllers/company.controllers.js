@@ -52,6 +52,7 @@ const createNewCompany = asyncHandler(async (req, res) => {
   );
 });
 
+
 /**
  * updateCompanyDetails
  * --------------------------------------------

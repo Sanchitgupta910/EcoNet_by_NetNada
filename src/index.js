@@ -2,6 +2,8 @@ import connectDB from "./db/index.js";
 import dotenv from "dotenv";
 import { app } from "./app.js";
 import { Server } from "socket.io";
+import http from 'http';
+
 
 dotenv.config({
     path: './.env'

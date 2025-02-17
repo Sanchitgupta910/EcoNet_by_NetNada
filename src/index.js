@@ -6,7 +6,8 @@ dotenv.config({
     path: './.env'
 })
 
-
+// Import the MQTT subscriber so it starts running
+// require('./mqtt/mqttSubscriber');   //uncomment when required
 
 
 connectDB() //function defined under db->index.js

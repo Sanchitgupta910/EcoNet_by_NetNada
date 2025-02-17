@@ -14,7 +14,8 @@ import { Dustbin } from "../models/dustbin.models.js";
  *   2. Validate that required fields (CompanyName and domain) are provided and not empty.
  *   3. Check if a company with the given domain already exists.
  *   4. Create a new company record in the database.
- *   5. Return a success response along with the created company details.
+ *   5. Emit a Socket.io event with the new company record.
+ *   6. Return a success response along with the created company details.
  *
  * @route POST /api/v1/companies/create
  */
@@ -41,7 +42,11 @@ const createNewCompany = asyncHandler(async (req, res) => {
   });
   console.log(companyRecord);
 
-  // Step 5: Return a success response with the company details.
+  // Step 5: Retrieve the Socket.io instance from app.locals and emit the newCompany event.
+  const io = req.app.locals.io;
+  io.emit('newCompany', companyRecord);
+  
+  // Step 6: Return a success response with the company details.
   return res.status(201).json(
     new ApiResponse(201, companyRecord, "Company record created successfully")
   );

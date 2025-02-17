@@ -1,4 +1,3 @@
-// src/mqtt/mqttSubscriber.js
 const mqtt = require('mqtt');
 const axios = require('axios');
 // Import your MongoDB model or service for storing data

@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import BranchAddress from "./branchAddress.models.js";
+import {BranchAddress} from "./branchAddress.models.js";
 
 const companySchema = new mongoose.Schema({
     CompanyName: {

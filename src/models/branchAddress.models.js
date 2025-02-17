@@ -29,7 +29,7 @@ const branchAddressSchema = new mongoose.Schema({
     },
     associatedCompany : {
         type: mongoose.Schema.Types.ObjectId,
-        ref: Company,
+        ref: "Company",
         required: true
     },
     isdeleted :{

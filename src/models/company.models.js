@@ -25,7 +25,7 @@ const companySchema = new mongoose.Schema({
 
 //virtual field to populate branch address
 companySchema.virtual("branchAddresses",{
-    ref: BranchAddress,
+    ref: "BranchAddress",
     localField: "_id",
     foreignField: "associatedCompany",
     justOne: false

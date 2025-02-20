@@ -11,6 +11,7 @@ const wasteSchema = new mongoose.Schema({
         type: Number,
         required: true
     }
+    
 },{timestamps:true})
 
 export const Waste = mongoose.model("Waste",wasteSchema)

@@ -5,12 +5,11 @@ import { BranchAddress } from "./branchAddress.models.js"
 const dustbinSchema = new mongoose.Schema({
     dustbinType :{
         type: String,
-        enum: ['Landfill','Recycling','Paper','Organic'],
+        enum: ['General Waste','Commingled','Organics','Paper & Cardboard'],
         required: true
     },
     currentWeight :{
         type: Number,
-        
         default: 0
     },
     binCapacity :{

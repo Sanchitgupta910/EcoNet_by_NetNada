@@ -20,7 +20,7 @@ const addDustbin = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Branch and bin capacity are required.");
     }
     
-    const dustbinTypes = ['Landfill', 'Recycling', 'Paper', 'Organic'];
+    const dustbinTypes = ['General Waste', 'Commingled', 'Organics', 'Paper & Cardboard'];
 
     // Check if bins already exist for that branch
     const existingDustbin = await Dustbin.findOne({ branchAddress, dustbinType: { $in: dustbinTypes } });
@@ -63,40 +63,9 @@ const getCurrentWeight = asyncHandler(async (req, res) => {
 
 })
 
-// // Endpoint to get company details with branch addresses and their dustbins
-// const getCompanyWithDustbins = async (req, res) => {
-//     try {
-//         const company = await Company.findById(req.params.id).populate('branchAddresses')
-//         if (!company) {
-//             return res.status(404).json({ message: "Company not found" })
-//         }
-
-//         // Fetch dustbins for each branch address
-//         const branchesWithDustbins = await Promise.all(
-//             company.branchAddresses.map(async (branch) => {
-//                 const dustbins = await Dustbin.find({ branchAddress: branch._id })
-//                 return {
-//                     ...branch.toObject(),
-//                     dustbins: dustbins // Attach dustbins to each branch
-//                 }
-//             })
-//         )
-
-//         res.status(200).json({
-//             data: {
-//                 ...company.toObject(),
-//                 branchAddresses: branchesWithDustbins // Attach branches with dustbins
-//             }
-//         })
-//     } catch (error) {
-//         res.status(500).json({ message: "Error fetching company details" })
-//     }
-// }
-
-
 
 
 export { addDustbin,
     getCurrentWeight,
-    //getCompanyWithDustbins
+    
  };

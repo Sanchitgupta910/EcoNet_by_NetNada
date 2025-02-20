@@ -2,6 +2,8 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Dustbin } from "../models/dustbin.models.js";
+import { Waste } from "../models/waste.models.js";
+import mongoose from "mongoose";
 
 const addDustbin = asyncHandler(async (req, res) => {
     /*
@@ -63,9 +65,86 @@ const getCurrentWeight = asyncHandler(async (req, res) => {
 
 })
 
+/**
+ * aggregatedWasteData
+ * --------------------------------------------
+ * Steps:
+ *   1. Extract branchId from the query parameters.
+ *   2. Filter waste records to only include those associated with bins belonging to that branch.
+ *   3. Group waste records by bin (associateBin) and sum the currentWeight.
+ *   4. Join (lookup) the Dustbin collection to fetch bin details (name, capacity).
+ *   5. Return an object mapping each bin to its aggregated waste weight along with its details.
+ *
+ * @route GET /api/v1/dustbin/aggregated?branchId=<branchId>
+ */
+const aggregatedWasteData = asyncHandler(async (req, res) => {
+    const { branchId } = req.query;
+    if (!branchId) {
+      throw new Error("branchId is required");
+    }
+  
+    // Step 3: Build the aggregation pipeline.
+    const pipeline = [
+      // Match waste records for bins that belong to the selected branch.
+      // This assumes your Dustbin documents have a field "branchAddress" that is an ObjectId.
+      {
+        $lookup: {
+          from: "dustbins", // Make sure this matches your Dustbin collection name
+          localField: "associateBin",
+          foreignField: "_id",
+          as: "binData"
+        }
+      },
+      // 2. Unwind the binData array
+      { $unwind: "$binData" },
+      // 3. Filter waste records to only those for the selected branch
+      {
+        $match: {
+          "binData.branchAddress": new mongoose.Types.ObjectId(branchId)
+        }
+      },
+      // 4. Sort the documents so that the most recent ones come first
+      { $sort: { createdAt: -1 } },
+      // 5. Group by associateBin and pick the first (latest) weight
+      {
+        $group: {
+          _id: "$associateBin",
+          latestWeight: { $first: "$currentWeight" },
+          // Optionally capture the latest createdAt if needed:
+          latestCreatedAt: { $first: "$createdAt" }
+        }
+      },
+      // 6. Lookup dustbin details to include bin name and capacity
+      {
+        $lookup: {
+          from: "dustbins",
+          localField: "_id",
+          foreignField: "_id",
+          as: "binDetails"
+        }
+      },
+      { $unwind: "$binDetails" },
+      // 7. Project the fields to return
+      {
+        $project: {
+          _id: 1,
+          latestWeight: 1,
+          binName: "$binDetails.dustbinType", // Adjust if you have a separate bin name field
+          binCapacity: "$binDetails.binCapacity"
+        }
+      }
+    ];
+  
+    // Execute the aggregation.
+    const result = await Waste.aggregate(pipeline);
+    // Transform result into an object keyed by bin id (or type) if needed.
+    return res.status(200).json(new ApiResponse(200, result, "Aggregated waste data fetched successfully"));
+  });
+
 
 
 export { addDustbin,
     getCurrentWeight,
+    aggregatedWasteData
     
  };

@@ -4,6 +4,9 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Dustbin } from "../models/dustbin.models.js";
 import { Waste } from "../models/waste.models.js";
 import mongoose from "mongoose";
+import {
+  startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths, subDays
+} from "date-fns";
 
 /**
  * Controller to add multiple dustbins.
@@ -17,7 +20,7 @@ const addDustbin = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Branch and bin capacity are required.");
   }
 
-  const dustbinTypes = ['General Waste', 'Commingled', 'Organics', 'Paper & Cardboard'];
+  const dustbinTypes = ['General Waste', 'Commingled', 'Organic', 'Paper & Cardboard'];
 
   // Check if dustbins already exist for the branch.
   const existingDustbin = await Dustbin.findOne({ branchAddress, dustbinType: { $in: dustbinTypes } });
@@ -59,34 +62,79 @@ const getCurrentWeight = asyncHandler(async (req, res) => {
 /**
  * aggregatedWasteData
  * --------------------------------------------
- * This controller aggregates waste data for a given branch.
- * It performs the following steps:
- *   1. Joins waste records with dustbin details.
- *   2. Filters records to only include waste for bins belonging to the specified branch.
- *   3. Sorts records by creation time in descending order.
- *   4. Groups records by bin to get the most recent (latest) waste weight.
- *   5. Looks up bin details (binName and binCapacity) and projects these fields.
- *   6. Emits a Socket.io event ("binWeightUpdated") with the aggregated data.
+ * Aggregates waste data for a given branch using a time filter.
+ * 
+ * Steps:
+ * 1. Extract branchId and filter from query parameters (default: "today").
+ * 2. Calculate the date range based on the filter:
+ *    - "today": from startOfDay to endOfDay.
+ *    - "thisWeek": current week.
+ *    - "lastWeek": previous week.
+ *    - "lastMonth": previous month.
+ * 3. Build an aggregation pipeline:
+ *    - Conditionally filter waste records by the calculated date range.
+ *    - Lookup and join waste records with dustbin details.
+ *    - Filter records by branch.
+ *    - Sort records by createdAt descending.
+ *    - Group records by bin to obtain the latest waste weight.
+ *    - Lookup dustbin details and project bin type and capacity.
+ * 4. If filter is "today" and no records are found, return default data (latestWeight = 0) for each bin in the branch.
+ * 5. Additionally, if the filter is "today" and current time is between 10:00 and 10:59 AM, 
+ *    retrieve yesterday's latest waste data and compare. If a bin's weight today equals yesterday's,
+ *    add a field 'notEmptied: true' to indicate that the bin has not been emptied.
+ * 6. Emit the aggregated data via Socket.io for real-time updates.
+ * 7. Return the aggregated data in the response.
  *
- * TEMP CODE:
- *   A mock function is provided to simulate updated waste data. This function:
- *   - For each aggregated bin record, calculates a new weight by adding a random increment.
- *   - Persists a new Waste record in the database.
- *   - Returns the new data so it can be emitted via Socket.io.
- *
- * @route GET /api/v1/dustbin/aggregated?branchId=<branchId>
+ * @route GET /api/v1/dustbin/aggregated?branchId=<branchId>&filter=<filter>
  */
 const aggregatedWasteData = asyncHandler(async (req, res) => {
-  const { branchId } = req.query;
+  const { branchId, filter = "today" } = req.query;
   if (!branchId) {
     throw new ApiError(400, "branchId is required");
   }
 
-  // Aggregation pipeline to retrieve the latest waste record per bin.
+  // --- Step 2: Calculate Date Range Based on Filter ---
+  let dateMatchStage = {};
+  if (req.query.filter) {
+    let startDate, endDate;
+    const now = new Date();
+    switch (req.query.filter) {
+      case "today":
+        startDate = startOfDay(now);
+        endDate = endOfDay(now);
+        break;
+      case "thisWeek":
+        startDate = startOfWeek(now);
+        endDate = endOfWeek(now);
+        break;
+      case "lastWeek":
+        const lastWeekDate = subWeeks(now, 1);
+        startDate = startOfWeek(lastWeekDate);
+        endDate = endOfWeek(lastWeekDate);
+        break;
+      case "lastMonth":
+        const lastMonthDate = subMonths(now, 1);
+        startDate = startOfMonth(lastMonthDate);
+        endDate = endOfMonth(lastMonthDate);
+        break;
+      default:
+        startDate = startOfDay(now);
+        endDate = endOfDay(now);
+    }
+    dateMatchStage = {
+      $match: {
+        createdAt: { $gte: startDate, $lte: endDate }
+      }
+    };
+  }
+
+  // --- Step 3: Build Aggregation Pipeline ---
   const pipeline = [
+    // Apply date filter if provided.
+    ...(req.query.filter ? [dateMatchStage] : []),
     {
       $lookup: {
-        from: "dustbins", // Must match the Dustbin collection name
+        from: "dustbins",
         localField: "associateBin",
         foreignField: "_id",
         as: "binData"
@@ -119,66 +167,89 @@ const aggregatedWasteData = asyncHandler(async (req, res) => {
       $project: {
         _id: 1,
         latestWeight: 1,
-        binName: "$binDetails.dustbinType",  // Adjust if your field name is different.
+        binName: "$binDetails.dustbinType",
         binCapacity: "$binDetails.binCapacity"
       }
     }
   ];
 
-  // Execute the aggregation.
-  const result = await Waste.aggregate(pipeline);
+  // --- Step 4: Execute Aggregation ---
+  let result = await Waste.aggregate(pipeline);
 
-  // Emit the aggregated data via Socket.io.
+  // If filter is "today" and no records are found, return default data with weight 0.
+  if (filter === "today" && (!result || result.length === 0)) {
+    const bins = await Dustbin.find({ branchAddress: branchId });
+    result = bins.map(bin => ({
+      _id: bin._id,
+      latestWeight: 0,
+      binName: bin.dustbinType,
+      binCapacity: bin.binCapacity
+    }));
+  }
+
+  // --- Step 5: Check for "Not Emptied" Condition at 10 AM ---
+  // Only apply this logic for the "today" filter.
+  if (filter === "today") {
+    const now = new Date();
+    // Check if current time is between 10:00 and 10:59 AM.
+    if (now.getHours() === 10) {
+      // Calculate yesterday's date range.
+      const yesterday = subDays(now, 1);
+      const yesterdayStart = startOfDay(yesterday);
+      const yesterdayEnd = endOfDay(yesterday);
+
+      // Build aggregation pipeline for yesterday's data.
+      const yesterdayPipeline = [
+        {
+          $match: {
+            createdAt: { $gte: yesterdayStart, $lte: yesterdayEnd }
+          }
+        },
+        {
+          $lookup: {
+            from: "dustbins",
+            localField: "associateBin",
+            foreignField: "_id",
+            as: "binData"
+          }
+        },
+        { $unwind: "$binData" },
+        {
+          $match: {
+            "binData.branchAddress": new mongoose.Types.ObjectId(branchId)
+          }
+        },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: "$associateBin",
+            latestWeight: { $first: "$currentWeight" }
+          }
+        }
+      ];
+
+      const yesterdayResult = await Waste.aggregate(yesterdayPipeline);
+      // Build a map of bin _id to yesterday's weight.
+      const yesterdayMap = {};
+      yesterdayResult.forEach(item => {
+        yesterdayMap[item._id.toString()] = item.latestWeight;
+      });
+      // Add a flag 'notEmptied' for bins where today's weight equals yesterday's.
+      result = result.map(bin => {
+        const binIdStr = bin._id.toString();
+        const yesterdayWeight = yesterdayMap[binIdStr] || 0;
+        return { ...bin, notEmptied: bin.latestWeight === yesterdayWeight };
+      });
+    }
+  }
+
+  // --- Step 6: Emit the Aggregated Data via Socket.io ---
   const io = req.app.locals.io;
   if (io) {
     io.emit('binWeightUpdated', result);
   }
 
-  /**
-   * TEMP CODE: Mock function to simulate increasing waste data.
-   * This function:
-   *   - Iterates over each bin record from the aggregation result.
-   *   - Calculates a new weight by adding a random increment (between 2 and 4 kg).
-   *   - Persists a new Waste record in the database with the updated weight.
-   *   - Returns the updated bin data to be emitted via Socket.io.
-   *
-   * Remove or disable this block once the real hardware data is available.
-   */
-  async function mockGenerateWasteDataAndPersist() {
-    const getRandomIncrement = () => Math.floor(Math.random() * 3) + 2; // Random increment: 2-4 kg
-    const newData = [];
-    for (const bin of result) {
-      // Calculate new weight that is greater than the last recorded weight.
-      const newWeight = bin.latestWeight + getRandomIncrement();
-      // Create a new waste record so that the change is persistent.
-      await Waste.create({
-        associateBin: bin._id,
-        currentWeight: newWeight,
-      });
-      // Build updated bin object.
-      newData.push({
-        _id: bin._id,
-        latestWeight: newWeight,
-        binName: bin.binName,
-        binCapacity: bin.binCapacity,
-      });
-    }
-    return newData;
-  }
-
-  // Uncomment the following block to enable persistent mock data generation every 10 seconds.
-  /*
-  setInterval(async () => {
-    try {
-      const mockData = await mockGenerateWasteDataAndPersist();
-      console.log("Generated and persisted mock waste data:", mockData);
-      io.emit('binWeightUpdated', mockData);
-    } catch (err) {
-      console.error("Error in mockGenerateWasteDataAndPersist:", err);
-    }
-  }, 10000);
-  */
-
+  // --- Step 7: Return the Aggregated Data in the Response ---
   return res.status(200).json(new ApiResponse(200, result, "Aggregated waste data fetched successfully"));
 });
 

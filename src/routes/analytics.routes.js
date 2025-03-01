@@ -1,10 +1,9 @@
 import express from 'express';
-import { branchWasteBreakdown, branchWasteRates } from '../controllers/analytics.controllers.js';
+import { branchWasteBreakdown, dailyDiversionRecycling } from '../controllers/analytics.controllers.js';
 const router = express.Router();
 
 // Global summary endpoint for SuperAdmin dashboard analytics.
 router.get('/branchWasteBreakdown', branchWasteBreakdown);
-router.get('/branchWasteRates', branchWasteRates);
-
+router.get("/dailyDiversionRecycling", dailyDiversionRecycling);
 
 export default router;

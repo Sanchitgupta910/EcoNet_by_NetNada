@@ -3,26 +3,26 @@ import { BranchAddress } from "./branchAddress.models.js"
 
 
 const dustbinSchema = new mongoose.Schema({
-    dustbinType :{
+    dustbinType: {
         type: String,
-        enum: ['General Waste','Commingled','Organics','Paper & Cardboard'],
+        enum: ['General Waste', 'Commingled', 'Organic', 'Paper & Cardboard'],
         required: true
     },
-    currentWeight :{
+    currentWeight: {
         type: Number,
         default: 0
     },
-    binCapacity :{
+    binCapacity: {
         type: Number,
-        enum : [25,50,75],
+        enum: [25, 50, 75],
         required: true
     },
-    branchAddress : {      //asociated branch
-      type: mongoose.Schema.Types.ObjectId,
-      ref: BranchAddress,
-      required: true
+    branchAddress: {      //asociated branch
+        type: mongoose.Schema.Types.ObjectId,
+        ref: BranchAddress,
+        required: true
     }
 
-},{timestamps:true})
+}, { timestamps: true })
 
-export const Dustbin= mongoose.model("Dustbin", dustbinSchema)
+export const Dustbin = mongoose.model("Dustbin", dustbinSchema)

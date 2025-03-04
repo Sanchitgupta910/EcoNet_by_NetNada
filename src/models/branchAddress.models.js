@@ -3,7 +3,7 @@ import { Company } from "./company.models.js"
 
 
 const branchAddressSchema = new mongoose.Schema({
-    branchName: {
+    officeName: {
         type: String, //NetNada Australia or NetNada USA or NetNada India
         required: true
     },
@@ -15,7 +15,7 @@ const branchAddressSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
-    state: {
+    region: {
         type: String,
         required: true,
     },
@@ -27,12 +27,12 @@ const branchAddressSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
-    associatedCompany : {
+    associatedCompany: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Company",
         required: true
     },
-    isdeleted :{
+    isdeleted: {
         type: Boolean,
         default: false
     }

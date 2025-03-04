@@ -350,7 +350,7 @@ const getUserByEmail = asyncHandler(async (req, res) => {
     .populate("company")
     .populate("branchAddress")
     .select("-password -refreshToken");
-    console.log("[getUserByEmail] User found:", user); // Debug log
+  console.log("[getUserByEmail] User found:", user); // Debug log
 
   if (!user) {
     throw new ApiError(404, "User not found");
@@ -478,7 +478,7 @@ const getAllUser = asyncHandler(async (req, res) => {
     // Step 3: Populate branch address details (only select specific fields, and exclude deleted addresses)
     .populate({
       path: "branchAddress",
-      select: "branchName address city state postalCode country",
+      select: "officeName address city region postalCode country",
       match: { isdeleted: false },
     })
     // Step 4: Exclude sensitive fields

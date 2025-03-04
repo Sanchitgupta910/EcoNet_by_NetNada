@@ -17,29 +17,29 @@ import { BranchAddress } from "../models/branchAddress.models.js";
  */
 const createNewAddress = asyncHandler(async (req, res) => {
   // Step 1: Extract required fields from the request body.
-  const { branchName, address, city, state, postalCode, country, associatedCompany } = req.body;
+  const { officeName, address, city, region, postalCode, country, associatedCompany } = req.body;
 
   // Step 2: Validate that all required fields are provided and not empty.
   if (
-    [branchName, address, city, state, postalCode, country, associatedCompany].some(
+    [officeName, address, city, region, postalCode, country, associatedCompany].some(
       (field) => !field || field.trim() === ""
     )
   ) {
     throw new ApiError(400, "All the fields are required!");
   }
 
-  // Step 3: Check if the branch already exists using the branchName.
-  const existedBranch = await BranchAddress.findOne({ branchName });
+  // Step 3: Check if the branch already exists using the officeName.
+  const existedBranch = await BranchAddress.findOne({ officeName });
   if (existedBranch) {
     throw new ApiError(409, "Branch already exists");
   }
 
   // Step 4: Create a new branch address entry in the database.
   const branchRecord = await BranchAddress.create({
-    branchName,
+    officeName,
     address,
     city,
-    state,
+    region,
     postalCode,
     country,
     associatedCompany,
@@ -58,7 +58,7 @@ const createNewAddress = asyncHandler(async (req, res) => {
  * Steps to update branch details:
  *   1. Extract the updated details from the frontend.
  *   2. Validate that all required fields are provided.
- *   3. Check if the branch exists using the branchName.
+ *   3. Check if the branch exists using the officeName.
  *   4. Update the branch record in the database.
  *   5. Return a success response with the updated branch details.
  *
@@ -66,27 +66,27 @@ const createNewAddress = asyncHandler(async (req, res) => {
  */
 const updateBranchDetails = asyncHandler(async (req, res) => {
   // Step 1: Extract updated fields from the request body.
-  const { branchName, address, city, state, postalCode, country, associatedCompany } = req.body;
+  const { officeName, address, city, region, postalCode, country, associatedCompany } = req.body;
 
   // Step 2: Validate that all required fields are provided.
   if (
-    [branchName, address, city, state, postalCode, country, associatedCompany].some(
+    [officeName, address, city, region, postalCode, country, associatedCompany].some(
       (field) => !field || field.trim() === ""
     )
   ) {
     throw new ApiError(400, "All the fields are required!");
   }
 
-  // Step 3: Check if the branch exists using the branchName.
-  const existedBranch = await BranchAddress.findOne({ branchName });
+  // Step 3: Check if the branch exists using the officeName.
+  const existedBranch = await BranchAddress.findOne({ officeName });
   if (!existedBranch) {
     throw new ApiError(404, "Company branch not found");
   }
 
   // Step 4: Update the branch record in the database.
   const updatedBranch = await BranchAddress.findOneAndUpdate(
-    { branchName },
-    { branchName, address, city, state, postalCode, country, associatedCompany },
+    { officeName },
+    { officeName, address, city, region, postalCode, country, associatedCompany },
     { new: true }
   );
 
@@ -100,7 +100,7 @@ const updateBranchDetails = asyncHandler(async (req, res) => {
  * deleteBranch
  * --------------------------------------------
  * Steps to delete a branch:
- *   1. Extract the branchName from the request body.
+ *   1. Extract the officeName from the request body.
  *   2. Check if the branch exists.
  *   3. Mark the branch as deleted (soft delete) by setting its isdeleted flag.
  *   4. Return a success response with the deleted branch details.
@@ -108,18 +108,18 @@ const updateBranchDetails = asyncHandler(async (req, res) => {
  * @route DELETE /api/v1/branchAddress/delete
  */
 const deleteBranch = asyncHandler(async (req, res) => {
-  // Step 1: Extract the branchName from the request body.
-  const { branchName } = req.body;
+  // Step 1: Extract the officeName from the request body.
+  const { officeName } = req.body;
 
   // Step 2: Check if the branch exists.
-  const existedBranch = await BranchAddress.findOne({ branchName });
+  const existedBranch = await BranchAddress.findOne({ officeName });
   if (!existedBranch) {
     throw new ApiError(404, "Company branch not found");
   }
 
   // Step 3: Mark the branch as deleted by updating its isdeleted flag.
   const deletedBranch = await BranchAddress.findOneAndUpdate(
-    { branchName },
+    { officeName },
     { isdeleted: true },
     { new: true }
   );

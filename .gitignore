@@ -1,3 +1,5 @@
 node_modules/
 .env
 generateWasteData.js
+waste_data_uploader.js
+waste_data_v2.json

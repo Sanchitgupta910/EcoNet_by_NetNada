@@ -22,39 +22,39 @@ const userSchema = new mongoose.Schema({
         required: true,
         lowercase: true,
         unique: true,
-        trim:true
+        trim: true
     },
-    phone :{
+    phone: {
         type: String,
     },
     password: {
         type: String,
         required: true
     },
-    role :{
+    role: {
         type: String
     },
-    refreshToken :{
+    refreshToken: {
         type: String
     },
     branchAddress: {
-        type : mongoose.Schema.Types.ObjectId,
+        type: mongoose.Schema.Types.ObjectId,
         ref: BranchAddress,
         required: true
     },
-    company : {
+    company: {
         type: mongoose.Schema.Types.ObjectId,
         ref: Company,
         required: true
     },
-    isdeleted :{
+    isdeleted: {
         type: Boolean,
         default: false
     }
-},{timestamps:true})
+}, { timestamps: true })
 
 // Pre-save hook to hash the password before saving it in the database
-userSchema.pre("save", async function(next) {
+userSchema.pre("save", async function (next) {
 
     // If the password field is not modified, skip the hashing process
     if (!this.isModified("password")) return next();
@@ -65,14 +65,14 @@ userSchema.pre("save", async function(next) {
 });
 
 // Method to check if the provided password matches the hashed password
-userSchema.methods.isPasswordCorrect = async function(password) {
+userSchema.methods.isPasswordCorrect = async function (password) {
 
     // Compare the provided password with the stored hashed password using bcrypt
     return await bcrypt.compare(password, this.password);
 };
 
 // Method to generate an access token for the user using JWT
-userSchema.methods.generateAccessToken = function() {
+userSchema.methods.generateAccessToken = function () {
 
     // Sign a JWT with the user's ID, full name, and email
     return jwt.sign({
@@ -80,22 +80,22 @@ userSchema.methods.generateAccessToken = function() {
         FullName: this.fullName,
         Email: this.email
     },
-    process.env.ACCESS_TOKEN_SECRET,  // Use the secret from the .env file
-    {
-        expiresIn: process.env.ACCESS_TOKEN_EXPIRY  // Token expiry time from the .env file
-    });
+        process.env.ACCESS_TOKEN_SECRET,  // Use the secret from the .env file
+        {
+            expiresIn: process.env.ACCESS_TOKEN_EXPIRY  // Token expiry time from the .env file
+        });
 };
 
 // Method to generate a refresh token for the user using JWT
-userSchema.methods.generateRefreshToken = function() {
+userSchema.methods.generateRefreshToken = function () {
     // Sign a refresh token using the user's ID
     return jwt.sign({
         _id: this._id
     },
-    process.env.REFRESH_TOKEN_SECRET,  // Use the refresh token secret from the .env file
-    {
-        expiresIn: process.env.REFRESH_TOKEN_EXPIRY  // Token expiry time from the .env file
-    });
+        process.env.REFRESH_TOKEN_SECRET,  // Use the refresh token secret from the .env file
+        {
+            expiresIn: process.env.REFRESH_TOKEN_EXPIRY  // Token expiry time from the .env file
+        });
 };
 
 // Plugin to enable aggregate pagination when required (commented out for now)

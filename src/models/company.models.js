@@ -1,38 +1,45 @@
-import mongoose from "mongoose";
-import {BranchAddress} from "./branchAddress.models.js";
+import mongoose from 'mongoose';
+import { BranchAddress } from './branchAddress.models.js';
 
-const companySchema = new mongoose.Schema({
+const companySchema = new mongoose.Schema(
+  {
     CompanyName: {
-        type: String,
-        required: true,
-        index: true,
+      type: String,
+      required: true,
+      index: true,
     },
     domain: {
-        type: String,
-        required: true,
-        lowercase: true,
-        unique: true,
+      type: String,
+      required: true,
+      lowercase: true,
+      unique: true,
     },
     noofEmployees: {
-        type: Number,
+      type: String,
+      required: true,
     },
-    isdeleted :{
-        type: Boolean,
-        default: false
-    }
-}, { timestamps: true });
-
+    industry: {
+      type: String,
+      required: true,
+    },
+    isdeleted: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true },
+);
 
 //virtual field to populate branch address
-companySchema.virtual("branchAddresses",{
-    ref: "BranchAddress",
-    localField: "_id",
-    foreignField: "associatedCompany",
-    justOne: false
+companySchema.virtual('branchAddresses', {
+  ref: 'BranchAddress',
+  localField: '_id',
+  foreignField: 'associatedCompany',
+  justOne: false,
 });
 
 // Include virtuals when converting to JSON or objects
-companySchema.set("toObject", { virtuals: true });
-companySchema.set("toJSON", { virtuals: true });
+companySchema.set('toObject', { virtuals: true });
+companySchema.set('toJSON', { virtuals: true });
 
-export const Company = mongoose.model("Company", companySchema);
+export const Company = mongoose.model('Company', companySchema);

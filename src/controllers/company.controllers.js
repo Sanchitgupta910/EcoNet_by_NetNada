@@ -1,10 +1,10 @@
-import { asyncHandler } from "../utils/asyncHandler.js";
-import { ApiError } from "../utils/ApiError.js";
-import { ApiResponse } from "../utils/ApiResponse.js";
-import { Company } from "../models/company.models.js";
-import { BranchAddress } from "../models/branchAddress.models.js";
-import { User } from "../models/user.models.js";
-import { Dustbin } from "../models/dustbin.models.js";
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
+import { Company } from '../models/company.models.js';
+import { BranchAddress } from '../models/branchAddress.models.js';
+import { User } from '../models/user.models.js';
+import { Dustbin } from '../models/dustbin.models.js';
 
 /**
  * createNewCompany
@@ -21,17 +21,19 @@ import { Dustbin } from "../models/dustbin.models.js";
  */
 const createNewCompany = asyncHandler(async (req, res) => {
   // Step 1: Extract company details from the request body.
-  const { CompanyName, domain, noofEmployees } = req.body;
+  const { CompanyName, domain, noofEmployees, industry } = req.body;
 
   // Step 2: Validate required fields. (Note: Only CompanyName and domain are required.)
-  if ([CompanyName, domain].some((field) => !field || field.trim() === "")) {
-    throw new ApiError(400, "Company name and domain are required!");
+  if (
+    [CompanyName, domain, noofEmployees, industry].some((field) => !field || field.trim() === '')
+  ) {
+    throw new ApiError(400, 'All fields are required!');
   }
 
   // Step 3: Check if a company with the same domain already exists.
   const existedCompany = await Company.findOne({ domain });
   if (existedCompany) {
-    throw new ApiError(409, "Company already exists");
+    throw new ApiError(409, 'Company already exists');
   }
 
   // Step 4: Create a new company record in the database.
@@ -39,19 +41,19 @@ const createNewCompany = asyncHandler(async (req, res) => {
     CompanyName,
     domain,
     noofEmployees,
+    industry,
   });
   console.log(companyRecord);
 
   // Step 5: Retrieve the Socket.io instance from app.locals and emit the newCompany event.
   const io = req.app.locals.io;
   io.emit('newCompany', companyRecord);
-  
-  // Step 6: Return a success response with the company details.
-  return res.status(201).json(
-    new ApiResponse(201, companyRecord, "Company record created successfully")
-  );
-});
 
+  // Step 6: Return a success response with the company details.
+  return res
+    .status(201)
+    .json(new ApiResponse(201, companyRecord, 'Company record created successfully'));
+});
 
 /**
  * updateCompanyDetails
@@ -67,30 +69,30 @@ const createNewCompany = asyncHandler(async (req, res) => {
  */
 const updateCompanyDetails = asyncHandler(async (req, res) => {
   // Step 1: Extract updated company details from the request body.
-  const { CompanyName, domain, noofEmployees } = req.body;
+  const { CompanyName, domain, noofEmployees, industry } = req.body;
 
   // Step 2: Validate required fields.
-  if ([CompanyName, domain].some((field) => !field || field.trim() === "")) {
-    throw new ApiError(400, "Company name and domain are required!");
+  if ([CompanyName, domain, industry].some((field) => !field || field.trim() === '')) {
+    throw new ApiError(400, 'All fields are required!');
   }
 
   // Step 3: Check if the company exists using the provided domain.
   const existedCompany = await Company.findOne({ domain });
   if (!existedCompany) {
-    throw new ApiError(404, "Company not found");
+    throw new ApiError(404, 'Company not found');
   }
 
   // Step 4: Update the company record in the database.
   const updatedCompany = await Company.findOneAndUpdate(
     { domain },
-    { CompanyName, domain, noofEmployees },
-    { new: true }
+    { CompanyName, domain, noofEmployees, industry },
+    { new: true },
   );
 
   // Step 5: Return a success response with the updated company details.
-  return res.status(200).json(
-    new ApiResponse(200, updatedCompany, "Company record updated successfully")
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, updatedCompany, 'Company record updated successfully'));
 });
 
 /**
@@ -111,20 +113,20 @@ const deleteCompany = asyncHandler(async (req, res) => {
   // Step 2: Check if the company exists.
   const existedCompany = await Company.findOne({ domain });
   if (!existedCompany) {
-    throw new ApiError(404, "Company not found");
+    throw new ApiError(404, 'Company not found');
   }
 
   // Step 3: Mark the company as deleted (soft delete).
   const deletedCompany = await Company.findOneAndUpdate(
     { domain },
     { isdeleted: true },
-    { new: true }
+    { new: true },
   );
 
   // Step 4: Return a success response with the deleted company details.
-  return res.status(200).json(
-    new ApiResponse(200, deletedCompany, "Company record deleted successfully")
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, deletedCompany, 'Company record deleted successfully'));
 });
 
 /**
@@ -139,11 +141,11 @@ const deleteCompany = asyncHandler(async (req, res) => {
 const getCompany = asyncHandler(async (req, res) => {
   // Step 1: Find all companies where isdeleted is false.
   const companyDetails = await Company.find({ isdeleted: false });
-  
+
   // Step 2: Return the company details in the response.
-  return res.status(200).json(
-    new ApiResponse(200, companyDetails, "Company details fetched successfully")
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, companyDetails, 'Company details fetched successfully'));
 });
 
 /**
@@ -170,7 +172,7 @@ const getCompanyById = asyncHandler(async (req, res) => {
   const company = await Company.findById(id);
   if (!company) {
     // Step 3: If company is not found, throw an error.
-    throw new ApiError(404, "Company not found");
+    throw new ApiError(404, 'Company not found');
   }
 
   // Step 4: Fetch branch addresses associated with this company.
@@ -187,7 +189,7 @@ const getCompanyById = asyncHandler(async (req, res) => {
         ...branch.toObject(),
         dustbins, // Attach dustbins to the branch object
       };
-    })
+    }),
   );
 
   // Step 7: Construct the comprehensive company details object.
@@ -198,15 +200,9 @@ const getCompanyById = asyncHandler(async (req, res) => {
   };
 
   // Step 8: Return the full company details in the response.
-  return res.status(200).json(
-    new ApiResponse(200, companyDetails, "Company details fetched successfully")
-  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, companyDetails, 'Company details fetched successfully'));
 });
 
-export {
-  createNewCompany,
-  updateCompanyDetails,
-  deleteCompany,
-  getCompany,
-  getCompanyById,
-};
+export { createNewCompany, updateCompanyDetails, deleteCompany, getCompany, getCompanyById };

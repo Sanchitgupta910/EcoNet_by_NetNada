@@ -73,17 +73,17 @@ const createNewAddress = asyncHandler(async (req, res) => {
  * updateBranchDetails
  * --------------------------------------------
  * Steps to update branch details:
- *   1. Extract updated fields from the request body.
+ *   1. Extract updated fields (and addressId) from the request body.
  *   2. Validate that all required fields are provided.
- *   3. Check if the branch exists using the officeName.
+ *   3. Check if the branch exists using the addressId.
  *   4. Update the branch record in the database.
  *   5. Return a success response with the updated branch details.
  *
  * @route PUT /api/v1/branchAddress/update
  */
 const updateBranchDetails = asyncHandler(async (req, res) => {
-  // Updated extraction: using subdivision and subdivisionType.
   const {
+    addressId,
     officeName,
     address,
     city,
@@ -93,6 +93,11 @@ const updateBranchDetails = asyncHandler(async (req, res) => {
     country,
     associatedCompany,
   } = req.body;
+
+  // Ensure addressId is provided.
+  if (!addressId) {
+    throw new ApiError(400, 'Address id is required for update.');
+  }
 
   // Validate all required fields.
   if (
@@ -110,15 +115,15 @@ const updateBranchDetails = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'All the fields are required!');
   }
 
-  // Check if the branch exists using the officeName.
-  const existedBranch = await BranchAddress.findOne({ officeName });
+  // Find the branch using the unique identifier
+  const existedBranch = await BranchAddress.findById(addressId);
   if (!existedBranch) {
     throw new ApiError(404, 'Company branch not found');
   }
 
-  // Update the branch record with new data.
-  const updatedBranch = await BranchAddress.findOneAndUpdate(
-    { officeName },
+  // Update the branch record with new data using its _id
+  const updatedBranch = await BranchAddress.findByIdAndUpdate(
+    addressId,
     {
       officeName,
       address,

@@ -9,9 +9,6 @@ dotenv.config({
   path: './.env',
 });
 
-//un-comment the mongoose aggregate import when required
-//import mongooseAggregatePaginate from "mongoose-aggregate-paginate-v2"
-
 const userSchema = new mongoose.Schema(
   {
     fullName: {
@@ -51,6 +48,11 @@ const userSchema = new mongoose.Schema(
     isdeleted: {
       type: Boolean,
       default: false,
+    },
+
+    createdby: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
     },
   },
   { timestamps: true },

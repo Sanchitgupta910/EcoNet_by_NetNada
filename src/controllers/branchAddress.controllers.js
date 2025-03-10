@@ -146,25 +146,29 @@ const updateBranchDetails = asyncHandler(async (req, res) => {
  * deleteBranch
  * --------------------------------------------
  * Steps to delete a branch:
- *   1. Extract the officeName from the request body.
- *   2. Check if the branch exists.
+ *   1. Extract the addressId from the request body.
+ *   2. Check if the branch exists using the addressId.
  *   3. Mark the branch as deleted (soft delete) by setting its isdeleted flag.
  *   4. Return a success response with the deleted branch details.
  *
  * @route DELETE /api/v1/branchAddress/delete
  */
 const deleteBranch = asyncHandler(async (req, res) => {
-  const { officeName } = req.body;
+  const { addressId } = req.body;
 
-  // Check if the branch exists.
-  const existedBranch = await BranchAddress.findOne({ officeName });
+  if (!addressId) {
+    throw new ApiError(400, 'Address id is required');
+  }
+
+  // Check if the branch exists using the addressId.
+  const existedBranch = await BranchAddress.findById(addressId);
   if (!existedBranch) {
     throw new ApiError(404, 'Company branch not found');
   }
 
   // Soft-delete the branch.
-  const deletedBranch = await BranchAddress.findOneAndUpdate(
-    { officeName },
+  const deletedBranch = await BranchAddress.findByIdAndUpdate(
+    addressId,
     { isdeleted: true },
     { new: true },
   );

@@ -30,22 +30,22 @@ export async function verifyTransporter() {
  *
  * @param {Object} options - The options for the email.
  * @param {string} options.to - The recipient's email address.
- * @param {string} options.fullName - The name of the recipient.
+ * @param {string} options.firstName - The name of the recipient.
  * @param {string} options.role - The role assigned to the new admin.
  * @param {string} options.companyName - The name of the company.
- * @param {string} options.email - The user's login id (email or identifier).
+ * @param {string} options.userId - The user's login id (email or identifier).
  * @param {string} options.password - The temporary password for the user.
  * @param {string} options.loginLink - The URL where the user can log in.
  */
 
-export async function sendInvitationEmail({ to, fullName, role, companyName, email, password }) {
+export async function sendInvitationEmail({ to, firstName, role, companyName, userId, password }) {
   const emailBody = `
-    Hi ${fullName}
+    Hi ${firstName}
     
     You have been added as a ${role} for ${companyName}.
 
     Your credentials are as follows:
-    - User ID: ${email}
+    - User ID: ${userId}
     - Password: ${password}
 
     Please follow the link to login: https://app.netnada.com/

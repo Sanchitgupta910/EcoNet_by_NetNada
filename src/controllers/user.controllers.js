@@ -585,6 +585,7 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 
   // Step 4: Create a new user record in the database with the provided details.
+  const createdby = req.user ? req.user._id : null;
   const user = await User.create({
     fullName,
     role,
@@ -593,6 +594,7 @@ const registerUser = asyncHandler(async (req, res) => {
     password,
     branchAddress,
     company,
+    createdby,
   });
 
   // Step 5: Retrieve the newly created user while excluding sensitive fields.

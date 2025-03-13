@@ -5,7 +5,6 @@ import {
   logoutUser,
   refreshAccessToken,
   getCurrentUser,
-  updateUserPassword,
   updateUserDetails,
   deleteUser,
   getAllUser,
@@ -25,7 +24,6 @@ router.route('/login').post(loginUser);
 router.route('/logout').post(verifyJWT, logoutUser);
 router.route('/refresh-token').post(refreshAccessToken);
 router.route('/me').get(verifyJWT, getCurrentUser);
-router.route('/updatepassword').post(verifyJWT, updateUserPassword); //update password
 router.route('/byEmail').get(getUserByEmail);
 router.route('/all-users').get(verifyJWT, authorizeRoles('SuperAdmin'), getAllUser);
 router.route('/updateuser').post(verifyJWT, authorizeRoles('SuperAdmin'), updateUserDetails);

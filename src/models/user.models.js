@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
-import { BranchAddress } from './branchAddress.models.js';
+import { OrgUnit } from './orgUnit.model.js';
 import { Company } from './company.models.js';
 
 dotenv.config({
@@ -35,14 +35,14 @@ const userSchema = new mongoose.Schema(
     refreshToken: {
       type: String,
     },
-    branchAddress: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: BranchAddress,
-      required: true,
-    },
     company: {
       type: mongoose.Schema.Types.ObjectId,
       ref: Company,
+      required: true,
+    },
+    OrgUnit: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: OrgUnit,
       required: true,
     },
     isdeleted: {

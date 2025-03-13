@@ -48,7 +48,7 @@ const generateAccessandRefreshToken = async (userID) => {
  * Registers a new user in the system and sends an invitation email.
  * Steps:
  *   1. Extract user details from the request body.
- *   2. Validate that required fields (fullName, email, password, orgUnit, company) are provided.
+ *   2. Validate that required fields (fullName, email, password, OrgUnit, company) are provided.
  *   3. Check if a user with the same email already exists.
  *   4. Create a new user record with the provided details.
  *   5. Retrieve the created user while excluding sensitive fields.
@@ -60,12 +60,12 @@ const generateAccessandRefreshToken = async (userID) => {
  * @route POST /api/v1/users/register
  */
 const registerUser = asyncHandler(async (req, res) => {
-  // Step 1: Extract user details. Note: "branchAddress" replaced with "orgUnit".
-  const { fullName, role, phone, email, password, orgUnit, company } = req.body;
+  // Step 1: Extract user details. Note: "branchAddress" replaced with "OrgUnit".
+  const { fullName, role, phone, email, password, OrgUnit, company } = req.body;
 
   // Step 2: Validate that required fields are provided.
   if (
-    [fullName, email, password, orgUnit, company].some(
+    [fullName, email, password, OrgUnit, company].some(
       (field) => !field || (typeof field === 'string' && !field.trim()),
     )
   ) {
@@ -86,7 +86,7 @@ const registerUser = asyncHandler(async (req, res) => {
     phone,
     email,
     password,
-    orgUnit,
+    OrgUnit,
     company,
     createdby,
   });
@@ -144,7 +144,7 @@ const registerUser = asyncHandler(async (req, res) => {
  *   4. Verify that the provided password is correct.
  *   5. Check if the user is required to reset their password.
  *   6. Generate access and refresh tokens.
- *   7. Retrieve the user details, populating company and orgUnit fields.
+ *   7. Retrieve the user details, populating company and OrgUnit fields.
  *   8. Set secure cookies with the tokens and return the user data.
  *
  * @route POST /api/v1/users/login
@@ -180,10 +180,11 @@ const loginUser = asyncHandler(async (req, res) => {
   // Step 6: Generate access and refresh tokens.
   const { accessToken, refreshToken } = await generateAccessandRefreshToken(user._id);
 
-  // Step 7: Retrieve user details, populating company and orgUnit fields.
+  // Step 7: Retrieve user details, populating company and OrgUnit fields.
+  // NOTE: Updated populate field to "OrgUnit" (matches schema) instead of "OrgUnit".
   let loggedUser = await User.findById(user._id)
     .populate('company')
-    .populate('orgUnit')
+    .populate('OrgUnit')
     .select('-password -refreshToken');
   loggedUser = loggedUser.toObject();
 
@@ -308,7 +309,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
  * -------------------------------------------
  * Fetches the current user's details, excluding the password, and populates related fields.
  * Steps:
- *   1. Find the user by ID and populate 'company' and 'orgUnit' fields.
+ *   1. Find the user by ID and populate 'company' and 'OrgUnit' fields.
  *   2. Return the user object.
  *
  * @route GET /api/v1/users/me
@@ -316,7 +317,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
   let user = await User.findById(req.user._id)
     .populate('company')
-    .populate('orgUnit')
+    .populate('OrgUnit')
     .select('-password');
   if (!user) {
     throw new ApiError(404, 'User not found');
@@ -332,7 +333,7 @@ const getCurrentUser = asyncHandler(async (req, res) => {
  * Steps:
  *   1. Extract the email from query parameters.
  *   2. Validate that email is provided.
- *   3. Find the user by email and populate 'company' and 'orgUnit' fields.
+ *   3. Find the user by email and populate 'company' and 'OrgUnit' fields.
  *   4. Return the user object.
  *
  * @route GET /api/v1/users/byEmail
@@ -344,7 +345,7 @@ const getUserByEmail = asyncHandler(async (req, res) => {
   }
   let user = await User.findOne({ email })
     .populate('company')
-    .populate('orgUnit')
+    .populate('OrgUnit')
     .select('-password -refreshToken');
   if (!user) {
     throw new ApiError(404, 'User not found');
@@ -359,7 +360,7 @@ const getUserByEmail = asyncHandler(async (req, res) => {
  * Updates the details of a user.
  * Steps:
  *   1. Determine the target user (from req.body.userId or req.user._id).
- *   2. Build an updates object from allowed fields (fullName, phone, role, orgUnit).
+ *   2. Build an updates object from allowed fields (fullName, phone, role, OrgUnit).
  *   3. Remove fields that have not changed.
  *   4. Preserve the existing company field.
  *   5. Update the user document and save.
@@ -373,8 +374,8 @@ const updateUserDetails = asyncHandler(async (req, res) => {
   if (!user) {
     throw new ApiError(404, 'User not found');
   }
-  // Allowed fields updated to include orgUnit.
-  const allowedUpdates = ['fullName', 'phone', 'role', 'orgUnit'];
+  // Allowed fields updated to include OrgUnit.
+  const allowedUpdates = ['fullName', 'phone', 'role', 'OrgUnit'];
   const updates = {};
   allowedUpdates.forEach((field) => {
     const value = req.body[field];
@@ -450,10 +451,10 @@ const deleteUser = asyncHandler(async (req, res) => {
 /**
  * getAllUser
  * -------------------------------------------
- * Retrieves all active (non-deleted) users with their company and orgUnit details.
+ * Retrieves all active (non-deleted) users with their company and OrgUnit details.
  * Steps:
  *   1. Find all users where isdeleted is false.
- *   2. Populate company and orgUnit fields.
+ *   2. Populate company and OrgUnit fields.
  *   3. Exclude sensitive fields and return the list.
  *
  * @route GET /api/v1/users
@@ -466,7 +467,7 @@ const getAllUser = asyncHandler(async (req, res) => {
       match: { isdeleted: false },
     })
     .populate({
-      path: 'orgUnit',
+      path: 'OrgUnit',
       select: 'name type parent',
     })
     .populate({

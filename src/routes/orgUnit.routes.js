@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createOrgUnit, getOrgUnit, getOrgUnitTree } from '../controllers/orgUnit.controller.js';
+import { createOrgUnit, getOrgUnit, getOrgUnitTree } from '../controllers/orgUnit.controllers.js';
 
 const router = Router();
 

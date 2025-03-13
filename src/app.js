@@ -22,7 +22,7 @@ import UserRouter from './routes/user.routes.js';
 import DustbinRouter from './routes/dustbin.routes.js';
 import WasteRoute from './routes/waste.routes.js';
 import AnalyticsRouter from './routes/analytics.routes.js';
-import { OrgUnit } from './models/orgUnit.model.js';
+import OrgUnitRouter from './routes/orgUnit.routes.js';
 
 //routes declaration
 app.use('/api/v1/company', CompanyRouter);
@@ -31,6 +31,6 @@ app.use('/api/v1/users', UserRouter);
 app.use('/api/v1/dustbin', DustbinRouter);
 app.use('/api/v1/waste', WasteRoute);
 app.use('/api/v1/analytics', AnalyticsRouter);
-app.use('/api/v1/orgUnits', OrgUnit);
+app.use('/api/v1/orgUnits', OrgUnitRouter);
 
 export { app };

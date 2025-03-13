@@ -1,6 +1,6 @@
-import { asyncHandler } from '../utils/asyncHandler';
-import { OrgUnit } from '../models/orgUnit.model';
-import { ApiError } from '../utils/ApiError';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
+import { OrgUnit } from '../models/orgUnit.model.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 
 /**
@@ -9,22 +9,32 @@ import { ApiResponse } from '../utils/ApiResponse.js';
  * Creates a new organizational unit.
  *
  * Steps:
- *   1. Validate the input: name and type are required; parent is optional.
- *   2. Create a new OrgUnit document.
- *   3. Save and return the created OrgUnit.
+ *   1. Validate that 'name' and 'type' are provided.
+ *   2. If type is "Branch", validate that a branchAddress ID is provided.
+ *   3. Create and save the OrgUnit document.
+ *   4. Return the created OrgUnit.
  *
  * @route POST /api/v1/orgUnits
  */
 const createOrgUnit = asyncHandler(async (req, res) => {
-  const { name, type, parent } = req.body;
+  const { name, type, parent, branchAddress } = req.body;
+
+  // Validate required fields for any OrgUnit.
   if (!name || !type) {
     throw new ApiError(400, 'Name and type are required');
   }
 
+  // If creating a Branch unit, branchAddress must be provided.
+  if (type === 'Branch' && (!branchAddress || branchAddress.trim() === '')) {
+    throw new ApiError(400, 'For a Branch, branchAddress is required');
+  }
+
+  // Create the new OrgUnit document.
   const newOrgUnit = new OrgUnit({
     name: name.trim(),
     type: type.trim(),
     parent: parent || null,
+    branchAddress: branchAddress ? branchAddress.trim() : null,
   });
 
   await newOrgUnit.save();
@@ -39,14 +49,14 @@ const createOrgUnit = asyncHandler(async (req, res) => {
  * Retrieves an organizational unit by its ID.
  *
  * Steps:
- *   1. Retrieve the OrgUnit document based on the provided ID.
+ *   1. Retrieve the OrgUnit document by ID.
  *   2. If not found, throw an error.
  *   3. Return the retrieved OrgUnit.
  *
  * @route GET /api/v1/orgUnits/:id
  */
 const getOrgUnit = asyncHandler(async (req, res) => {
-  const orgUnit = await OrgUnit.findById(req.params.id);
+  const orgUnit = await OrgUnit.findById(req.params.id).populate('branchAddress');
   if (!orgUnit) {
     throw new ApiError(404, 'Organizational Unit not found');
   }
@@ -68,9 +78,9 @@ const getOrgUnit = asyncHandler(async (req, res) => {
  * @route GET /api/v1/orgUnits/tree
  */
 const getOrgUnitTree = asyncHandler(async (req, res) => {
-  const allUnits = await OrgUnit.find().lean();
+  const allUnits = await OrgUnit.find().populate('branchAddress').lean();
 
-  // Build a map for quick lookup and initialize children arrays
+  // Build a lookup map for quick access and initialize children arrays.
   const unitMap = {};
   allUnits.forEach((unit) => {
     unit.children = [];

@@ -8,6 +8,7 @@ dotenv.config({
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: process.env.SMTP_PORT,
+
   secure: true,
   auth: {
     user: process.env.SMTP_USER,
@@ -39,6 +40,7 @@ export async function verifyTransporter() {
  */
 
 export async function sendInvitationEmail({ to, firstName, role, companyName, userId, password }) {
+  const loginLink = process.env.LOGIN_LINK;
   const emailBody = `
     Hi ${firstName}
     
@@ -48,14 +50,14 @@ export async function sendInvitationEmail({ to, firstName, role, companyName, us
     - User ID: ${userId}
     - Password: ${password}
 
-    Please follow the link to login: https://app.netnada.com/
+    Please follow the link to login: ${loginLink}
 
     Thankyou,
     The EcoNet Team
   `;
 
   const emailOptions = {
-    from: 'sanchit@netnada.com.au',
+    from: 'process.ENV.FROM_EMAIL',
     to,
     subject: 'Invitation to EcoNet Admin Portal',
     text: emailBody,

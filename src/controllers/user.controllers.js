@@ -147,12 +147,13 @@ const registerUser = asyncHandler(async (req, res) => {
  *   2. Validate that both email and password are provided.
  *   3. Find the user by email.
  *   4. Verify that the provided password is correct.
- *   5. Generate new access and refresh tokens.
- *   6. Retrieve the logged-in user details (populating company and branchAddress fields),
+ *   5. Check if the user is required to reset their password.
+ *   6. Generate new access and refresh tokens.
+ *   7. Retrieve the logged-in user details (populating company and branchAddress fields),
  *      then convert the Mongoose document to a plain JavaScript object.
- *   7. If the user is linked to a company, fetch all non-deleted branch addresses for that company
+ *   8. If the user is linked to a company, fetch all non-deleted branch addresses for that company
  *      and attach them to the company object.
- *   8. Set secure cookies with the tokens and return the fully populated user data.
+ *   9. Set secure cookies with the tokens and return the fully populated user data.
  *
  * @route POST /api/v1/users/login
  */
@@ -177,10 +178,17 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new ApiError(401, 'Invalid Credentials');
   }
 
-  // Step 5: Generate access and refresh tokens for the user
+  //Step 5: Check if the user is required to reset their password
+  if (user.forcePasswordReset) {
+    return res
+      .status(403)
+      .json({ message: 'Password reset required. Please change your password.' });
+  }
+
+  // Step 6: Generate access and refresh tokens for the user
   const { accessToken, refreshToken } = await generateAccessandRefreshToken(user._id);
 
-  // Step 6: Retrieve the logged-in user details, populating company and branchAddress fields
+  // Step 7: Retrieve the logged-in user details, populating company and branchAddress fields
   let loggedUser = await User.findById(user._id)
     .populate('company')
     .populate('branchAddress')
@@ -189,7 +197,7 @@ const loginUser = asyncHandler(async (req, res) => {
   // Convert the Mongoose document to a plain JavaScript object.
   loggedUser = loggedUser.toObject();
 
-  // Step 7: If the user is linked to a company, fetch all non-deleted branch addresses for that company.
+  // Step 8: If the user is linked to a company, fetch all non-deleted branch addresses for that company.
   if (loggedUser.company && loggedUser.company._id) {
     const branchAddresses = await BranchAddress.find({
       associatedCompany: loggedUser.company._id,
@@ -199,7 +207,7 @@ const loginUser = asyncHandler(async (req, res) => {
     loggedUser.company.branchAddresses = branchAddresses;
   }
 
-  // Step 8: Prepare options for secure cookies.
+  // Step 9: Prepare options for secure cookies.
   const isProduction = process.env.NODE_ENV === 'production';
   const options = {
     httpOnly: true,
@@ -207,7 +215,7 @@ const loginUser = asyncHandler(async (req, res) => {
     maxAge: rememberMe ? 1000 * 60 * 60 * 24 * 30 : 1000 * 60 * 60, // 30 days vs 1 hour
   };
 
-  // Step 9: Send tokens via cookies and return the fully populated logged-in user data.
+  // Step 10: Send tokens via cookies and return the fully populated logged-in user data.
   return res
     .status(200)
     .cookie('accessToken', accessToken, options)
@@ -624,26 +632,25 @@ const getAllUser = asyncHandler(async (req, res) => {
  * forgotPassword
  * -------------------------------------------
  * Sends a password reset email to the user.
- * This controller handles two scenarios:
- *   1. A standard forgot password request (user-initiated).
- *   2. An admin-created user where a temporary password is set; in this case,
- *      the email includes both the temporary password and a reset link.
+ * Handles two scenarios:
+ *   1. Standard user-initiated password reset.
+ *   2. Admin-created user with a temporary password.
  *
  * Steps:
- *   1. Extract and validate the email (and optional tempPassword) from the request body.
- *   2. Find the user by email.
+ *   1. Validate the email and (optionally) tempPassword from the request.
+ *   2. Retrieve the user by email (case-insensitive).
  *   3. Generate a secure reset token and set an expiration (1 hour).
- *   4. Save the token and expiration in the user record (bypassing validations).
- *   5. Construct a reset URL using a FRONTEND_URL environment variable.
- *   6. Configure Nodemailer using environment SMTP settings.
- *   7. Prepare an email that conditionally includes temporary credentials.
- *   8. Send the email and handle errors.
+ *   4. Save the token and expiration to the user's record (skipping full validations).
+ *   5. Construct a reset URL using the FRONTEND_URL environment variable.
+ *   6. Configure the Nodemailer transporter with SMTP settings.
+ *   7. Build the email content, including the temporary password if provided.
+ *   8. Send the email and handle any errors.
  *   9. Return a success response.
  *
  * @route POST /api/v1/users/forgotPassword
  */
 const forgotPassword = asyncHandler(async (req, res) => {
-  // Step 1: Extract email and an optional temporary password from the request body
+  // Step 1: Validate input email and optional tempPassword
   const { email, tempPassword } = req.body;
   if (!email || typeof email !== 'string' || !email.trim()) {
     throw new ApiError(400, 'A valid email is required');
@@ -652,7 +659,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
   // Step 2: Find the user by email (using case-insensitive matching)
   const user = await User.findOne({ email: email.trim().toLowerCase() });
   if (!user) {
-    // Avoid revealing if the email exists for security reasons.
+    // Avoid revealing if the email exists
     throw new ApiError(404, 'User not found');
   }
 
@@ -661,48 +668,48 @@ const forgotPassword = asyncHandler(async (req, res) => {
   user.resetPasswordToken = resetToken;
   user.resetPasswordExpires = Date.now() + 3600000; // 1 hour in milliseconds
 
-  // Step 4: Save the token and expiration to the user's record without running full validations
+  // Step 4: Save the token and expiration (bypassing full validations)
   try {
     await user.save({ validateBeforeSave: false });
   } catch (error) {
     throw new ApiError(500, 'Error saving reset token. Please try again later.');
   }
 
-  // Step 5: Construct the reset URL (using FRONTEND_URL from env or default to localhost)
+  // Step 5: Construct the reset URL using the FRONTEND_URL environment variable
   const resetURL = `${
     process.env.FRONTEND_URL || 'http://localhost:3000'
   }/reset-password?token=${resetToken}`;
 
-  // Step 6: Configure Nodemailer transporter with SMTP settings from environment variables
+  // Step 6: Configure Nodemailer transporter with SMTP settings
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT),
-    secure: process.env.SMTP_SECURE === 'true', // true for port 465; false otherwise
+    secure: process.env.SMTP_SECURE === 'true', // true for port 465, false otherwise
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
   });
 
-  // Step 7: Prepare the email content (HTML format)
+  // Step 7: Build the email content (HTML format)
   let htmlContent = `<p>Hello,</p>
-           <p>You requested a password reset. Please click the link below to reset your password:</p>
-           <p><a href="${resetURL}">Reset Password</a></p>`;
+    <p>You requested a password reset. Please click the link below to reset your password:</p>
+    <p><a href="${resetURL}">Reset Password</a></p>`;
   // If a temporary password is provided (admin-created scenario), include it in the email.
   if (tempPassword && typeof tempPassword === 'string' && tempPassword.trim()) {
     htmlContent += `<p>Your temporary password is: <strong>${tempPassword}</strong></p>
-                    <p>Please use this temporary password to log in and immediately reset your password using the link above.</p>`;
+      <p>You are required to change this password immediately after logging in.</p>`;
   }
   htmlContent += `<p>If you did not request this, please ignore this email. The link expires in 1 hour.</p>`;
 
   const mailOptions = {
-    from: process.env.FROM_EMAIL, // Must be allowed by your SMTP provider
+    from: process.env.FROM_EMAIL, // Ensure this email is allowed by your SMTP provider
     to: user.email,
     subject: 'Password Reset Request',
     html: htmlContent,
   };
 
-  // Step 8: Attempt to send the email and handle any errors
+  // Step 8: Attempt to send the email and handle errors
   try {
     await transporter.sendMail(mailOptions);
   } catch (error) {
@@ -718,25 +725,27 @@ const forgotPassword = asyncHandler(async (req, res) => {
  * resetPassword
  * -------------------------------------------
  * Resets the user's password using the provided reset token.
+ * On successful reset, the reset token fields and the forcePasswordReset flag are cleared.
+ *
  * Steps:
- *   1. Extract and validate the reset token and new password from the request body.
- *   2. Find the user by the reset token ensuring it has not expired.
- *   3. Update the user's password with the new password.
+ *   1. Validate the reset token and new password from the request.
+ *   2. Retrieve the user by the reset token and ensure it has not expired.
+ *   3. Update the user's password (which triggers hashing via pre-save hook).
  *   4. Clear the reset token and expiration fields.
- *   5. Save the updated user record (bypassing validations if necessary).
- *   6. (Optionally) Remove sensitive fields from the response.
+ *   5. Clear the forcePasswordReset flag.
+ *   6. Save the updated user record.
  *   7. Return a success response.
  *
  * @route POST /api/v1/users/resetPassword
  */
 const resetPassword = asyncHandler(async (req, res) => {
-  // Step 1: Extract and validate reset token and new password from request body
+  // Step 1: Validate input: token and new password
   const { token, newPassword } = req.body;
   if (!token || !newPassword || typeof newPassword !== 'string' || !newPassword.trim()) {
     throw new ApiError(400, 'Reset token and a valid new password are required');
   }
 
-  // Step 2: Find the user by the reset token and ensure it is not expired
+  // Step 2: Find the user by reset token and ensure the token has not expired
   const user = await User.findOne({
     resetPasswordToken: token,
     resetPasswordExpires: { $gt: Date.now() },
@@ -745,14 +754,17 @@ const resetPassword = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Invalid or expired reset token');
   }
 
-  // Step 3: Update the user's password with the new password
+  // Step 3: Update the user's password with the new value (password will be hashed automatically)
   user.password = newPassword.trim();
 
   // Step 4: Clear the reset token and expiration fields
   user.resetPasswordToken = undefined;
   user.resetPasswordExpires = undefined;
 
-  // Step 5: Save the updated user record (bypassing full validations if necessary)
+  // Step 5: Clear the forced password reset flag
+  user.forcePasswordReset = false;
+
+  // Step 6: Save the updated user record (bypassing full validations if needed)
   try {
     await user.save({ validateBeforeSave: false });
   } catch (error) {
@@ -760,7 +772,7 @@ const resetPassword = asyncHandler(async (req, res) => {
     throw new ApiError(500, 'Error resetting password. Please try again later.');
   }
 
-  // Step 6: (Optional) Remove sensitive fields before responding
+  // Optionally remove sensitive fields before responding
   user.password = undefined;
 
   // Step 7: Return a success response

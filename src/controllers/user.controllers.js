@@ -5,6 +5,8 @@ import { sendInvitationEmail } from '../utils/EmailService.js';
 import { Company } from '../models/company.models.js';
 import { BranchAddress } from '../models/branchAddress.models.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
+import nodemailer from 'nodemailer';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken'; // Needed for verifying refresh tokens
 
 /**
@@ -618,6 +620,153 @@ const getAllUser = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, users, 'Users fetched successfully.'));
 });
 
+/**
+ * forgotPassword
+ * -------------------------------------------
+ * Sends a password reset email to the user.
+ * This controller handles two scenarios:
+ *   1. A standard forgot password request (user-initiated).
+ *   2. An admin-created user where a temporary password is set; in this case,
+ *      the email includes both the temporary password and a reset link.
+ *
+ * Steps:
+ *   1. Extract and validate the email (and optional tempPassword) from the request body.
+ *   2. Find the user by email.
+ *   3. Generate a secure reset token and set an expiration (1 hour).
+ *   4. Save the token and expiration in the user record (bypassing validations).
+ *   5. Construct a reset URL using a FRONTEND_URL environment variable.
+ *   6. Configure Nodemailer using environment SMTP settings.
+ *   7. Prepare an email that conditionally includes temporary credentials.
+ *   8. Send the email and handle errors.
+ *   9. Return a success response.
+ *
+ * @route POST /api/v1/users/forgotPassword
+ */
+const forgotPassword = asyncHandler(async (req, res) => {
+  // Step 1: Extract email and an optional temporary password from the request body
+  const { email, tempPassword } = req.body;
+  if (!email || typeof email !== 'string' || !email.trim()) {
+    throw new ApiError(400, 'A valid email is required');
+  }
+
+  // Step 2: Find the user by email (using case-insensitive matching)
+  const user = await User.findOne({ email: email.trim().toLowerCase() });
+  if (!user) {
+    // Avoid revealing if the email exists for security reasons.
+    throw new ApiError(404, 'User not found');
+  }
+
+  // Step 3: Generate a secure reset token and set expiration (1 hour)
+  const resetToken = crypto.randomBytes(20).toString('hex');
+  user.resetPasswordToken = resetToken;
+  user.resetPasswordExpires = Date.now() + 3600000; // 1 hour in milliseconds
+
+  // Step 4: Save the token and expiration to the user's record without running full validations
+  try {
+    await user.save({ validateBeforeSave: false });
+  } catch (error) {
+    throw new ApiError(500, 'Error saving reset token. Please try again later.');
+  }
+
+  // Step 5: Construct the reset URL (using FRONTEND_URL from env or default to localhost)
+  const resetURL = `${
+    process.env.FRONTEND_URL || 'http://localhost:3000'
+  }/reset-password?token=${resetToken}`;
+
+  // Step 6: Configure Nodemailer transporter with SMTP settings from environment variables
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: process.env.SMTP_SECURE === 'true', // true for port 465; false otherwise
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  // Step 7: Prepare the email content (HTML format)
+  let htmlContent = `<p>Hello,</p>
+           <p>You requested a password reset. Please click the link below to reset your password:</p>
+           <p><a href="${resetURL}">Reset Password</a></p>`;
+  // If a temporary password is provided (admin-created scenario), include it in the email.
+  if (tempPassword && typeof tempPassword === 'string' && tempPassword.trim()) {
+    htmlContent += `<p>Your temporary password is: <strong>${tempPassword}</strong></p>
+                    <p>Please use this temporary password to log in and immediately reset your password using the link above.</p>`;
+  }
+  htmlContent += `<p>If you did not request this, please ignore this email. The link expires in 1 hour.</p>`;
+
+  const mailOptions = {
+    from: process.env.FROM_EMAIL, // Must be allowed by your SMTP provider
+    to: user.email,
+    subject: 'Password Reset Request',
+    html: htmlContent,
+  };
+
+  // Step 8: Attempt to send the email and handle any errors
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error(`Error sending password reset email to ${user.email}:`, error);
+    throw new ApiError(500, 'Error sending password reset email. Please try again later.');
+  }
+
+  // Step 9: Return a success response
+  return res.status(200).json(new ApiResponse(200, {}, 'Password reset link sent successfully'));
+});
+
+/**
+ * resetPassword
+ * -------------------------------------------
+ * Resets the user's password using the provided reset token.
+ * Steps:
+ *   1. Extract and validate the reset token and new password from the request body.
+ *   2. Find the user by the reset token ensuring it has not expired.
+ *   3. Update the user's password with the new password.
+ *   4. Clear the reset token and expiration fields.
+ *   5. Save the updated user record (bypassing validations if necessary).
+ *   6. (Optionally) Remove sensitive fields from the response.
+ *   7. Return a success response.
+ *
+ * @route POST /api/v1/users/resetPassword
+ */
+const resetPassword = asyncHandler(async (req, res) => {
+  // Step 1: Extract and validate reset token and new password from request body
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword || typeof newPassword !== 'string' || !newPassword.trim()) {
+    throw new ApiError(400, 'Reset token and a valid new password are required');
+  }
+
+  // Step 2: Find the user by the reset token and ensure it is not expired
+  const user = await User.findOne({
+    resetPasswordToken: token,
+    resetPasswordExpires: { $gt: Date.now() },
+  });
+  if (!user) {
+    throw new ApiError(400, 'Invalid or expired reset token');
+  }
+
+  // Step 3: Update the user's password with the new password
+  user.password = newPassword.trim();
+
+  // Step 4: Clear the reset token and expiration fields
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpires = undefined;
+
+  // Step 5: Save the updated user record (bypassing full validations if necessary)
+  try {
+    await user.save({ validateBeforeSave: false });
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    throw new ApiError(500, 'Error resetting password. Please try again later.');
+  }
+
+  // Step 6: (Optional) Remove sensitive fields before responding
+  user.password = undefined;
+
+  // Step 7: Return a success response
+  return res.status(200).json(new ApiResponse(200, {}, 'Password has been reset successfully'));
+});
+
 // Export all user-related controllers
 export {
   registerUser,
@@ -630,4 +779,6 @@ export {
   updateUserDetails,
   deleteUser,
   getAllUser,
+  forgotPassword,
+  resetPassword,
 };

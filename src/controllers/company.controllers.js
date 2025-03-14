@@ -179,7 +179,7 @@ const getCompanyById = asyncHandler(async (req, res) => {
   const branchAddresses = await BranchAddress.find({ associatedCompany: id });
 
   // Step 5: Fetch users associated with this company.
-  const users = await User.find({ company: id });
+  const users = await User.find({ company: id }).populate('OrgUnit', 'name type');
 
   // Step 6: For each branch address, fetch associated dustbins and attach them.
   const branchesWithDustbins = await Promise.all(

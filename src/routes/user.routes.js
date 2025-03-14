@@ -18,6 +18,7 @@ const router = Router();
 
 //route starts with:   /api/v1/users
 router.route('/register').post(verifyJWT, authorizeRoles('SuperAdmin'), registerUser);
+// router.route('/register').post(registerUser);
 router.route('/login').post(loginUser);
 
 //secure routes

@@ -123,56 +123,44 @@ const getOrgUnitTree = asyncHandler(async (req, res) => {
 });
 
 /**
- * createOrgUnitsForBranchAddress
- * -------------------------------------------
- * Automatically creates and links the complete organizational hierarchy for a branch.
+ * createOrgUnitsForBranchAddressService
+ * -----------------------------------------------------
+ * Creates the complete hierarchical OrgUnit structure for a branch.
+ * Each OrgUnit name is built using the companyName along with the specific location detail.
  *
- * Expected fields in req.body:
+ * Parameters:
+ *   - companyName: String used as a prefix in all OrgUnit names.
  *   - officeName: The branch’s office name.
- *   - city: The city where the branch is located.
- *   - subdivision: The region/state/territory (optional).
- *   - country: The country where the branch is located.
- *   - branchAddressId: The ID of the created BranchAddress document.
- *
- * Process:
- *   1. Validate required fields.
- *   2. For the Country level:
- *      - Look for an OrgUnit of type "Country" with the given country name.
- *      - Create one if it does not exist.
- *   3. For the Region level (if subdivision is provided):
- *      - Look for an OrgUnit of type "Region" under the Country.
- *      - Create one if not found.
- *   4. For the City level:
- *      - Determine the parent: use the Region if available; otherwise, the Country.
- *      - Look for an OrgUnit of type "City" under the determined parent.
- *      - Create one if not found.
- *   5. For the Branch level:
- *      - Look for an OrgUnit of type "Branch" with the given office name under the City.
- *      - Create one if not found, linking it to the BranchAddress.
+ *   - city: The branch's city.
+ *   - subdivision: The region/state (if available).
+ *   - country: The branch's country.
+ *   - branchAddressId: The ObjectId of the created branch address.
  *
  * Returns:
- *   A JSON response with the created or found OrgUnit records for each level.
- *
- * Error Handling:
- *   - Validates required fields and uses try/catch blocks for each level.
- *
- * @route POST /api/v1/orgUnits/createBranchHierarchy
+ *   An object with the records created or found: { countryUnit, regionUnit, cityUnit, branchUnit }.
  */
-const createOrgUnitsForBranchAddress = asyncHandler(async (req, res) => {
-  const { officeName, city, subdivision, country, branchAddressId } = req.body;
-
-  // Validate required fields.
-  if (!officeName || !city || !country || !branchAddressId) {
-    throw new ApiError(400, 'Office name, city, country, and branchAddressId are required.');
-  }
+export const createOrgUnitsForBranchAddressService = async ({
+  companyName,
+  officeName,
+  city,
+  subdivision,
+  country,
+  branchAddressId,
+}) => {
+  // Format names with the company name as prefix.
+  const countryName = `${companyName}_${country.trim()}`;
+  const regionName =
+    subdivision && subdivision.trim() !== '' ? `${companyName}_${subdivision.trim()}` : null;
+  const cityName = `${companyName}_${city.trim()}`;
+  const branchUnitName = `${companyName}_${officeName.trim()}`;
 
   // --- Country Level ---
   let countryUnit;
   try {
-    countryUnit = await OrgUnit.findOne({ name: country.trim(), type: 'Country' });
+    countryUnit = await OrgUnit.findOne({ name: countryName, type: 'Country' });
     if (!countryUnit) {
       countryUnit = await OrgUnit.create({
-        name: country.trim(),
+        name: countryName,
         type: 'Country',
         parent: null,
       });
@@ -183,16 +171,16 @@ const createOrgUnitsForBranchAddress = asyncHandler(async (req, res) => {
 
   // --- Region Level (Optional) ---
   let regionUnit = null;
-  if (subdivision && subdivision.trim() !== '') {
+  if (regionName) {
     try {
       regionUnit = await OrgUnit.findOne({
-        name: subdivision.trim(),
+        name: regionName,
         type: 'Region',
         parent: countryUnit._id,
       });
       if (!regionUnit) {
         regionUnit = await OrgUnit.create({
-          name: subdivision.trim(),
+          name: regionName,
           type: 'Region',
           parent: countryUnit._id,
         });
@@ -205,16 +193,15 @@ const createOrgUnitsForBranchAddress = asyncHandler(async (req, res) => {
   // --- City Level ---
   let cityUnit;
   try {
-    // Determine the parent for the City: Region if available; otherwise, Country.
     const parentForCity = regionUnit ? regionUnit._id : countryUnit._id;
     cityUnit = await OrgUnit.findOne({
-      name: city.trim(),
+      name: cityName,
       type: 'City',
       parent: parentForCity,
     });
     if (!cityUnit) {
       cityUnit = await OrgUnit.create({
-        name: city.trim(),
+        name: cityName,
         type: 'City',
         parent: parentForCity,
       });
@@ -227,31 +214,92 @@ const createOrgUnitsForBranchAddress = asyncHandler(async (req, res) => {
   let branchUnit;
   try {
     branchUnit = await OrgUnit.findOne({
-      name: officeName.trim(),
+      name: branchUnitName,
       type: 'Branch',
       parent: cityUnit._id,
     });
     if (!branchUnit) {
       branchUnit = await OrgUnit.create({
-        name: officeName.trim(),
+        name: branchUnitName,
         type: 'Branch',
         parent: cityUnit._id,
-        branchAddress: branchAddressId.trim(),
+        branchAddress: branchAddressId.toString(), // Safely convert ObjectId to string.
       });
     }
   } catch (error) {
     throw new ApiError(500, 'Error processing branch OrgUnit: ' + error.message);
   }
 
+  return { countryUnit, regionUnit, cityUnit, branchUnit };
+};
+
+/**
+ * createOrgUnitsForBranchAddress
+ * -------------------------------------------
+ * Express endpoint to create the organizational hierarchy for a branch.
+ * Expects: companyName, officeName, city, subdivision, country, branchAddressId in req.body.
+ *
+ * @route POST /api/v1/orgUnits/createBranchHierarchy
+ */
+const createOrgUnitsForBranchAddress = asyncHandler(async (req, res) => {
+  const { companyName, officeName, city, subdivision, country, branchAddressId } = req.body;
+  if (!companyName || !officeName || !city || !country || !branchAddressId) {
+    throw new ApiError(
+      400,
+      'Company name, office name, city, country, and branchAddressId are required.',
+    );
+  }
+  const orgUnits = await createOrgUnitsForBranchAddressService({
+    companyName,
+    officeName,
+    city,
+    subdivision,
+    country,
+    branchAddressId,
+  });
   return res
     .status(201)
     .json(
-      new ApiResponse(
-        201,
-        { countryUnit, regionUnit, cityUnit, branchUnit },
-        'Organizational hierarchy for branch created successfully',
-      ),
+      new ApiResponse(201, orgUnits, 'Organizational hierarchy for branch created successfully'),
     );
 });
 
-export { createOrgUnit, getOrgUnit, getOrgUnitTree, createOrgUnitsForBranchAddress };
+/**
+ * getOrgUnitsByType
+ * -------------------------------------------
+ * Retrieves OrgUnit records filtered by a given type.
+ *
+ * Expected query parameter:
+ *   - type: The type of OrgUnit to retrieve (e.g., "Country", "Region", "City", or "Branch").
+ *
+ * Process:
+ *   1. Validate that the 'type' query parameter is provided.
+ *   2. Query the OrgUnit collection for records with the matching type.
+ *   3. Populate the branchAddress field for branch-type units.
+ *   4. Return the list of OrgUnit records.
+ *
+ * @route GET /api/v1/orgUnits/byType
+ */
+const getOrgUnitsByType = asyncHandler(async (req, res) => {
+  const { type } = req.query;
+  if (!type) {
+    throw new ApiError(400, 'OrgUnit type query parameter is required');
+  }
+
+  let units;
+  try {
+    units = await OrgUnit.find({ type: type.trim() }).populate('branchAddress').lean();
+  } catch (error) {
+    throw new ApiError(500, 'Error retrieving OrgUnits: ' + error.message);
+  }
+
+  return res.status(200).json(new ApiResponse(200, units, 'OrgUnits retrieved successfully'));
+});
+
+export {
+  createOrgUnit,
+  getOrgUnit,
+  getOrgUnitTree,
+  createOrgUnitsForBranchAddress,
+  getOrgUnitsByType,
+};

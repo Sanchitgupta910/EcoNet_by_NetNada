@@ -2,35 +2,27 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import { BranchAddress } from '../models/branchAddress.models.js';
+import { createOrgUnitsForBranchAddressService } from './orgUnit.controllers.js';
 
 /**
  * createNewAddress
- * --------------------------------------------
- * Steps to create a new address:
- *   1. Extract required fields from the request body.
- *   2. Validate that all required fields are provided.
- *   3. Check if a branch with the same officeName already exists.
- *   4. Create a new branch address entry in the database.
- *   5. Return a success response with the branch details.
+ * ------------------
+ * Creates a new branch address record and automatically triggers the creation
+ * of the associated organizational units (Country, Region, City, and Branch).
+ *
+ * Expected fields in req.body:
+ *   - officeName, address, city, subdivision, subdivisionType, postalCode, country, associatedCompany, companyName
+ *
+ * Edge Cases:
+ *   - Validates required fields.
+ *   - Prevents duplicate branch entries.
+ *   - If any error occurs during OrgUnit creation, it is handled gracefully.
  *
  * @route POST /api/v1/branchAddress/create
  */
 const createNewAddress = asyncHandler(async (req, res) => {
-  // Updated extraction to include subdivision and subdivisionType instead of region.
-  const {
-    officeName,
-    address,
-    city,
-    subdivision,
-    subdivisionType,
-    postalCode,
-    country,
-    associatedCompany,
-  } = req.body;
-
-  // Validate all required fields.
-  if (
-    [
+  try {
+    const {
       officeName,
       address,
       city,
@@ -39,34 +31,69 @@ const createNewAddress = asyncHandler(async (req, res) => {
       postalCode,
       country,
       associatedCompany,
-    ].some((field) => !field || field.trim() === '')
-  ) {
-    throw new ApiError(400, 'All the fields are required!');
+      companyName, // new field used to build OrgUnit names
+    } = req.body;
+
+    // Validate required fields.
+    if (
+      [
+        officeName,
+        address,
+        city,
+        subdivision,
+        subdivisionType,
+        postalCode,
+        country,
+        associatedCompany,
+        companyName,
+      ].some((field) => !field || field.trim() === '')
+    ) {
+      throw new ApiError(400, 'All the fields are required!');
+    }
+
+    // Check if a branch with the same officeName already exists.
+    const existedBranch = await BranchAddress.findOne({ officeName });
+    if (existedBranch) {
+      throw new ApiError(409, 'Branch already exists');
+    }
+
+    // Create the new branch address record.
+    const branchRecord = await BranchAddress.create({
+      officeName,
+      address,
+      city,
+      subdivision,
+      subdivisionType,
+      postalCode,
+      country,
+      associatedCompany,
+    });
+
+    // Automatically create the OrgUnit hierarchy for the new branch.
+    // Pass companyName along with other branch details so that OrgUnit names are properly formatted.
+    const orgUnits = await createOrgUnitsForBranchAddressService({
+      companyName,
+      officeName: branchRecord.officeName,
+      city: branchRecord.city,
+      subdivision: branchRecord.subdivision,
+      country: branchRecord.country,
+      branchAddressId: branchRecord._id,
+    });
+
+    // Return a combined response including the branch and OrgUnit details.
+    return res
+      .status(201)
+      .json(
+        new ApiResponse(
+          201,
+          { branchRecord, orgUnits },
+          'Branch Address and associated Org Units created successfully',
+        ),
+      );
+  } catch (error) {
+    console.error('Error in createNewAddress:', error);
+    throw error;
   }
-
-  // Check if a branch with the same officeName already exists.
-  const existedBranch = await BranchAddress.findOne({ officeName });
-  if (existedBranch) {
-    throw new ApiError(409, 'Branch already exists');
-  }
-
-  // Create a new branch address entry using the updated fields.
-  const branchRecord = await BranchAddress.create({
-    officeName,
-    address,
-    city,
-    subdivision,
-    subdivisionType,
-    postalCode,
-    country,
-    associatedCompany,
-  });
-  console.log(branchRecord);
-
-  // Return a success response.
-  return res
-    .status(201)
-    .json(new ApiResponse(201, branchRecord, 'Company branch created successfully'));
 });
 
 /**

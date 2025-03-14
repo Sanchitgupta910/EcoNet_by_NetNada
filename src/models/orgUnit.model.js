@@ -20,7 +20,7 @@ const orgUnitSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['Company', 'Country', 'City', 'Branch'],
+      enum: ['Company', 'Country', 'Region', 'City', 'Branch'],
       required: true,
     },
     parent: {

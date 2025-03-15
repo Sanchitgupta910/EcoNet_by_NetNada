@@ -1,7 +1,7 @@
-import { ApiError } from "../utils/ApiError.js";
-import { asyncHandler } from "../utils/asyncHandler.js";
-import jwt from "jsonwebtoken";
-import { User } from "../models/user.models.js";
+import { ApiError } from '../utils/ApiError.js';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import jwt from 'jsonwebtoken';
+import { User } from '../models/user.models.js';
 
 /**
  * verifyJWT middleware:
@@ -12,27 +12,29 @@ import { User } from "../models/user.models.js";
  *  - Otherwise, attaches the user object to the request and calls next().
  */
 export const verifyJWT = asyncHandler(async (req, res, next) => {
+  const unprotectedPaths = ['/resetPassword', '/forgotPassword'];
+  if (unprotectedPaths.some((path) => req.path === path)) {
+    return next();
+  }
   try {
     // Retrieve token from cookies or header
-    const token =
-      req.cookies?.accessToken ||
-      req.headers?.authorization?.replace("Bearer ", "");
+    const token = req.cookies?.accessToken || req.headers?.authorization?.replace('Bearer ', '');
 
     if (!token) {
-      throw new ApiError(401, "Unauthorized request.");
+      throw new ApiError(401, 'Unauthorized request.');
     }
 
     // Log the token for debugging (remove in production)
-    console.log("Token received:", token);
+    console.log('Token received:', token);
 
     // Verify the token using JWT secret
     const decodedToken = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
     // Fetch the user based on the decoded token's _id and exclude sensitive fields
-    const user = await User.findById(decodedToken?._id).select("-password -refreshToken");
+    const user = await User.findById(decodedToken?._id).select('-password -refreshToken');
 
     if (!user) {
-      throw new ApiError(401, "Invalid Access Token.");
+      throw new ApiError(401, 'Invalid Access Token.');
     }
 
     // Attach the user object to the request for later middleware or controllers
@@ -40,7 +42,7 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
     next();
   } catch (error) {
     // Optionally, log error.message for debugging
-    throw new ApiError(401, "Invalid Access Token.");
+    throw new ApiError(401, 'Invalid Access Token.');
   }
 });
 
@@ -54,7 +56,7 @@ export const verifyJWT = asyncHandler(async (req, res, next) => {
 export const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
-      throw new ApiError(403, "You do not have permission to perform this action.");
+      throw new ApiError(403, 'You do not have permission to perform this action.');
     }
     next();
   };

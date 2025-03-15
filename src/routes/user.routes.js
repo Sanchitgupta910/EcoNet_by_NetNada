@@ -16,6 +16,10 @@ import { verifyJWT, authorizeRoles } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
+//public routes for password reset operation
+router.route('/forgotPassword').post(forgotPassword);
+router.route('/resetPassword').post(resetPassword);
+
 //route starts with:   /api/v1/users
 router.route('/register').post(verifyJWT, authorizeRoles('SuperAdmin'), registerUser);
 // router.route('/register').post(registerUser);
@@ -29,9 +33,5 @@ router.route('/byEmail').get(getUserByEmail);
 router.route('/all-users').get(verifyJWT, authorizeRoles('SuperAdmin'), getAllUser);
 router.route('/updateuser').post(verifyJWT, authorizeRoles('SuperAdmin'), updateUserDetails);
 router.route('/deleteuser').post(verifyJWT, authorizeRoles('SuperAdmin'), deleteUser);
-
-//public routes for password reset operation
-router.route('/forgotPassword').post(forgotPassword);
-router.route('/resetPassword').post(resetPassword);
 
 export default router;

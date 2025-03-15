@@ -5,8 +5,13 @@ import { sendInvitationEmail } from '../utils/EmailService.js';
 import { Company } from '../models/company.models.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import nodemailer from 'nodemailer';
+import dotenv from 'dotenv';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken'; // For verifying refresh tokens
+
+dotenv.config({
+  path: '../../.env',
+});
 
 /**
  * generateAccessandRefreshToken
@@ -518,17 +523,19 @@ const forgotPassword = asyncHandler(async (req, res) => {
   } catch (error) {
     throw new ApiError(500, 'Error saving reset token. Please try again later.');
   }
-  const resetURL = `${
-    process.env.FRONTEND_URL || 'http://localhost:3000'
-  }/reset-password?token=${resetToken}`;
+  const resetURL = `${process.env.FRONTEND_URL}/password-reset?token=${resetToken}`;
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT),
-    secure: process.env.SMTP_SECURE === 'true',
+    port: process.env.SMTP_PORT,
+    secure: true,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
+    pool: true, // Enable connection pooling
+    maxConnections: 5, // Adjust based on your needs
+    maxMessages: 100, // Maximum messages per connection
+    socketTimeout: 10000, // Increase socket timeout (in milliseconds)
   });
   let htmlContent = `<p>Hello,</p>
     <p>You requested a password reset. Please click the link below to reset your password:</p>

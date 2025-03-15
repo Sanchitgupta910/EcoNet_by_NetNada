@@ -11,6 +11,8 @@ import {
   getUserByEmail,
   forgotPassword,
   resetPassword,
+  inviteUser,
+  completeRegistration,
 } from '../controllers/user.controllers.js';
 import { verifyJWT, authorizeRoles } from '../middlewares/auth.middleware.js';
 
@@ -24,6 +26,15 @@ router.route('/resetPassword').post(resetPassword);
 router.route('/register').post(verifyJWT, authorizeRoles('SuperAdmin'), registerUser);
 // router.route('/register').post(registerUser);
 router.route('/login').post(loginUser);
+
+router
+  .route('/invite')
+  .post(
+    verifyJWT,
+    authorizeRoles('SuperAdmin', 'CountryAdmin', 'RegionalAdmin', 'CityAdmin'),
+    inviteUser,
+  );
+router.route('/completeRegistration').post(completeRegistration);
 
 //secure routes
 router.route('/logout').post(verifyJWT, logoutUser);

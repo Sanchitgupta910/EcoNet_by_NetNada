@@ -1,8 +1,9 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { User } from '../models/user.models.js';
-import { sendInvitationEmail } from '../utils/EmailService.js';
+import { sendInvitationEmail, sendCompleteRegistrationEmail } from '../utils/EmailService.js';
 import { Company } from '../models/company.models.js';
+import { Invitation } from '../models/invitation.models.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
 import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
@@ -50,92 +51,92 @@ const generateAccessandRefreshToken = async (userID) => {
 /**
  * registerUser
  * -------------------------------------------
- * Registers a new user in the system and sends an invitation email.
- * Steps:
- *   1. Extract user details from the request body.
- *   2. Validate that required fields (fullName, email, password, OrgUnit, company) are provided.
- *   3. Check if a user with the same email already exists.
- *   4. Create a new user record with the provided details.
- *   5. Retrieve the created user while excluding sensitive fields.
- *   6. Fetch company details for populating the invitation email.
- *   7. Extract the first name from the fullName.
- *   8. Prepare email data and send the invitation email.
- *   9. Return a success response with the created user details.
+ * Registers a new user (invite mode) and sends an invitation email.
+ *
+ * For invitations, if fullName or password are missing:
+ *   - fullName defaults to "Invited User"
+ *   - password is auto-generated as a temporary password.
+ *
+ * Required fields:
+ *   - email, role, OrgUnit, company.
+ *
+ * The inviting admin's ID is saved in the 'createdby' field.
  *
  * @route POST /api/v1/users/register
  */
 const registerUser = asyncHandler(async (req, res) => {
-  // Step 1: Extract user details. Note: "branchAddress" replaced with "OrgUnit".
+  // Extract fields from the request body.
   const { fullName, role, phone, email, password, OrgUnit, company } = req.body;
 
-  // Step 2: Validate that required fields are provided.
-  if (
-    [fullName, email, password, OrgUnit, company].some(
-      (field) => !field || (typeof field === 'string' && !field.trim()),
-    )
-  ) {
-    throw new ApiError(400, 'All fields are required!');
+  // Validate minimal required fields.
+  if (!email || !OrgUnit || !company || !role) {
+    throw new ApiError(400, 'Email, role, OrgUnit, and company are required');
   }
 
-  // Step 3: Check if a user with the same email already exists.
+  // Use defaults for fullName and password if not provided.
+  const effectiveFullName = fullName && fullName.trim() ? fullName.trim() : 'Invited User';
+  const effectivePassword =
+    password && password.trim() ? password.trim() : crypto.randomBytes(8).toString('hex');
+
+  // Check if the email already exists.
   const existedUser = await User.findOne({ email });
   if (existedUser) {
     throw new ApiError(409, 'Email already exists!');
   }
 
-  // Step 4: Create a new user record. If available, set "createdby" from req.user.
+  // Use the authenticated user (from req.user) as the inviter.
   const createdby = req.user ? req.user._id : null;
+
+  // Create the user.
   const user = await User.create({
-    fullName,
+    fullName: effectiveFullName,
     role,
     phone,
     email,
-    password,
+    password: effectivePassword,
     OrgUnit,
     company,
     createdby,
   });
 
-  // Step 5: Retrieve the newly created user excluding sensitive fields.
+  // Retrieve the newly created user without sensitive fields.
   const createdUser = await User.findById(user._id).select('-password -refreshToken');
-
-  // Step 6: Ensure that the user was successfully created.
   if (!createdUser) {
-    throw new ApiError(500, 'Something went wrong while registering the user 😢');
+    throw new ApiError(500, 'Something went wrong while registering the user');
   }
 
-  // Step 7: Fetch company details to populate the invitation email.
+  // Fetch company details (to include in the invitation email).
   let companyDetails;
   try {
     companyDetails = await Company.findById(createdUser.company);
   } catch (error) {
-    console.error('Error while fetching company details for invitation', error);
+    console.error('Error fetching company details for invitation:', error);
     companyDetails = { CompanyName: 'NetNada' };
   }
 
-  // Step 8: Extract the first name from the fullName.
-  const firstName = fullName.split(' ')[0];
+  // Extract first name for email personalization.
+  const firstName = effectiveFullName.split(' ')[0];
 
-  // Step 9: Prepare the email data and send the invitation email.
+  // Prepare email data.
   const emailData = {
     to: createdUser.email,
     firstName,
     role: createdUser.role,
     companyName: companyDetails.CompanyName,
     userId: createdUser.email,
-    password,
+    password: effectivePassword,
   };
 
   try {
+    // Send the invitation email.
     await sendInvitationEmail(emailData);
   } catch (error) {
-    console.error(`Error while sending invitation email to ${createdUser.email}`, error);
+    console.error(`Error sending invitation email to ${createdUser.email}:`, error);
   }
 
-  // Step 10: Return a success response with the created user details.
   return res
     .status(201)
-    .json(new ApiResponse(200, createdUser, 'User registered successfully! 😊'));
+    .json(new ApiResponse(200, createdUser, 'User registered and invitation sent successfully!'));
 });
 
 /**
@@ -602,6 +603,127 @@ const resetPassword = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponse(200, {}, 'Password has been reset successfully'));
 });
 
+/**
+ * inviteUser
+ * ---------------------------
+ * Endpoint for higher-level admins to invite a user.
+ * This function:
+ *  - Validates the request (email, role, OrgUnit, company are required)
+ *  - Generates a unique invitation token and expiration (24 hours)
+ *  - Creates an invitation record in the database
+ *  - Sends a complete registration invitation email (with a registration link that includes the token)
+ *
+ * @route POST /api/v1/users/invite
+ */
+const inviteUser = asyncHandler(async (req, res) => {
+  // Destructure and validate required fields from the request body.
+  const { email, role, OrgUnit, company } = req.body;
+  if (!email || !role || !OrgUnit || !company) {
+    throw new ApiError(400, 'Email, role, OrgUnit, and company are required.');
+  }
+
+  // Generate a unique invitation token using crypto and set an expiration (24 hours)
+  const token = crypto.randomBytes(20).toString('hex');
+  const expires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+
+  // Create the invitation record
+  const invitation = await Invitation.create({
+    email,
+    role,
+    OrgUnit,
+    company,
+    token,
+    expires,
+  });
+
+  // Prepare the invitation link using the FRONTEND_URL from your environment
+  const invitationLink = `${process.env.FRONTEND_URL}/user-setup?token=${token}&email=${email}`;
+
+  // Fetch company details for email personalization
+  let companyDetails;
+  try {
+    companyDetails = await Company.findById(company);
+  } catch (error) {
+    console.error('Error fetching company details for invitation:', error);
+    companyDetails = { CompanyName: 'Your Company Name' };
+  }
+
+  // Determine first name (if available, you might improve this by storing firstName separately)
+  const firstName = email.split('@')[0];
+
+  try {
+    // Send the complete registration invitation email.
+    await sendCompleteRegistrationEmail({
+      to: email,
+      firstName,
+      invitationLink,
+      role,
+      companyName: companyDetails.CompanyName,
+    });
+  } catch (error) {
+    console.error(`Error sending complete registration email to ${email}:`, error);
+    // Optionally delete the invitation record if email sending fails.
+    await Invitation.findByIdAndDelete(invitation._id);
+    throw new ApiError(500, 'Error sending invitation email. Please try again later.');
+  }
+
+  // Return a successful response
+  return res.status(201).json({ message: 'Invitation sent successfully.' });
+});
+
+/**
+ * completeRegistration
+ * ---------------------------
+ * Endpoint for invited users to complete their registration.
+ * The invited user must supply a valid token (from the invitation email),
+ * along with the fields that they are allowed to set (e.g., fullName, password, phone).
+ *
+ * This function:
+ *  - Validates that token, fullName, and password are provided.
+ *  - Finds the corresponding invitation record that is not used and not expired.
+ *  - Creates the new user record using invitation details (role, OrgUnit, company)
+ *    and the invited user’s provided details.
+ *  - Marks the invitation as used.
+ *
+ * @route POST /api/v1/users/completeRegistration
+ */
+const completeRegistration = asyncHandler(async (req, res) => {
+  // Destructure required fields from the request body.
+  const { token, fullName, password, phone } = req.body;
+  if (!token || !fullName || !password) {
+    throw new ApiError(400, 'Token, full name, and password are required.');
+  }
+
+  // Find the invitation record with the token, ensure it has not been used and is still valid.
+  const invitation = await Invitation.findOne({ token, used: false });
+  if (!invitation) {
+    throw new ApiError(400, 'Invalid or expired invitation token.');
+  }
+  if (invitation.expires < Date.now()) {
+    throw new ApiError(400, 'Invitation token has expired.');
+  }
+
+  // Create the new user record.
+  // Note: The email, role, OrgUnit, and company come from the invitation.
+  const user = await User.create({
+    email: invitation.email,
+    fullName: fullName.trim(),
+    password: password.trim(),
+    phone, // optional field
+    role: invitation.role,
+    OrgUnit: invitation.OrgUnit,
+    company: invitation.company,
+  });
+
+  // Mark the invitation as used.
+  invitation.used = true;
+  await invitation.save();
+
+  // Return the created user without sensitive fields.
+  const createdUser = await User.findById(user._id).select('-password -refreshToken');
+  return res.status(201).json({ message: 'Registration complete.', user: createdUser });
+});
+
 // Export all user-related controllers (excluding updateUserPassword)
 export {
   registerUser,
@@ -615,4 +737,6 @@ export {
   getAllUser,
   forgotPassword,
   resetPassword,
+  inviteUser,
+  completeRegistration,
 };

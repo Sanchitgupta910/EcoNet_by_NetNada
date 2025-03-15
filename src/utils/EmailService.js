@@ -71,3 +71,52 @@ export async function sendInvitationEmail({ to, firstName, role, companyName, us
     throw err;
   }
 }
+
+/**
+ * Sends a complete registration invitation email to a new user.
+ * This email contains a link (with the invitation token) that allows the user
+ * to complete their registration without receiving credentials upfront.
+ *
+ * @param {Object} options - The options for the email.
+ * @param {string} options.to - The recipient's email address.
+ * @param {string} options.firstName - The first name of the recipient.
+ * @param {string} options.invitationLink - The URL for completing registration.
+ * @param {string} options.role - The role assigned to the user.
+ * @param {string} options.companyName - The name of the company.
+ */
+export async function sendCompleteRegistrationEmail({
+  to,
+
+  invitationLink,
+  role,
+  companyName,
+}) {
+  const emailBody = `
+    Hi,
+
+    You have been invited as a ${role} for ${companyName}.
+
+    Please click on the link below to complete your registration:
+    ${invitationLink}
+
+    If you did not expect this invitation, please ignore this email.
+
+    Thank you,
+    The EcoNet Team
+  `;
+
+  const emailOptions = {
+    from: process.env.FROM_EMAIL, // Ensure this environment variable is correctly set.
+    to,
+    subject: 'Complete Your Registration for EcoNet',
+    text: emailBody,
+  };
+
+  try {
+    await transporter.sendMail(emailOptions);
+    console.log(`Complete registration email sent to ${to}`);
+  } catch (err) {
+    console.error('Error sending complete registration email:', err);
+    throw err;
+  }
+}

@@ -190,8 +190,12 @@ const loginUser = asyncHandler(async (req, res) => {
   // NOTE: Updated populate field to "OrgUnit" (matches schema) instead of "OrgUnit".
   let loggedUser = await User.findById(user._id)
     .populate('company')
-    .populate('OrgUnit')
+    .populate({
+      path: 'OrgUnit',
+      populate: { path: 'branchAddress' }, // Populate branchAddress within OrgUnit
+    })
     .select('-password -refreshToken');
+  console.log('Logged User OrgUnit:', loggedUser.OrgUnit);
   loggedUser = loggedUser.toObject();
 
   // Step 8: Prepare secure cookie options.
@@ -323,8 +327,12 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 const getCurrentUser = asyncHandler(async (req, res) => {
   let user = await User.findById(req.user._id)
     .populate('company')
-    .populate('OrgUnit')
+    .populate({
+      path: 'OrgUnit',
+      populate: { path: 'branchAddress' }, // Populate branchAddress within OrgUnit
+    })
     .select('-password');
+
   if (!user) {
     throw new ApiError(404, 'User not found');
   }
@@ -351,8 +359,12 @@ const getUserByEmail = asyncHandler(async (req, res) => {
   }
   let user = await User.findOne({ email })
     .populate('company')
-    .populate('OrgUnit')
+    .populate({
+      path: 'OrgUnit',
+      populate: { path: 'branchAddress' },
+    })
     .select('-password -refreshToken');
+
   if (!user) {
     throw new ApiError(404, 'User not found');
   }

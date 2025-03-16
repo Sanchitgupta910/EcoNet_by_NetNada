@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { verifyJWT } from '../middlewares/auth.middleware.js';
 import {
   getBinStatus,
+  getLatestBinWeight,
   getMinimalOverview,
   getOverviewData,
   getWasteByStream,
@@ -64,5 +65,10 @@ router.get('/leaderboard', verifyJWT, getLeaderboard);
  * Optional query parameters: orgUnitId, companyId (for SuperAdmin)
  */
 router.get('/activityFeed', verifyJWT, getActivityFeed);
+
+/**
+ * GET /api/v1/analytics/latestBinWeight */
+
+router.get('/latestBinWeight', verifyJWT, getLatestBinWeight);
 
 export default router;

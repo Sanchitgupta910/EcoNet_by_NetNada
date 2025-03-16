@@ -1,737 +1,569 @@
-import { asyncHandler } from "../utils/asyncHandler.js";
-import { ApiError } from "../utils/ApiError.js";
-import { ApiResponse } from "../utils/ApiResponse.js";
-import { Waste } from "../models/waste.models.js";
-import { Dustbin } from "../models/dustbin.models.js";
-import mongoose from "mongoose";
-import {
-    startOfDay,
-    endOfDay,
-    startOfWeek,
-    endOfWeek,
-    startOfMonth,
-    endOfMonth,
-    subWeeks,
-    subMonths,
-} from "date-fns";
+// dashboard.analytics.controllers.js
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
+import { Waste } from '../models/waste.models.js';
+import { Dustbin } from '../models/dustbin.models.js';
+import { BranchAddress } from '../models/branchAddress.models.js';
+import { OrgUnit } from '../models/orgUnit.model.js';
+import mongoose from 'mongoose';
+import { startOfDay, endOfDay, format, startOfMonth, endOfMonth, subDays } from 'date-fns';
 
 /**
- * branchWasteBreakdown
- * --------------------------------------------
- * Aggregates waste data for a specific branch by dustbin type using only the final reading
- * of each day (e.g., the 6 PM reading). This ensures that for each day, only the last
- * recorded weight is considered, avoiding double-counting.
+ * GET /api/v1/analytics/binStatus
+ * -------------------------------------------
+ * Retrieves real-time bin status data for a given branch.
  *
  * Query Parameters:
- *   - branchId: (required) the branch's identifier.
- *   - filter: (optional) time filter ("today", "thisWeek", "lastWeek", "lastMonth"; default: today).
+ *  - branchId (required): The ObjectId of the branch (BranchAddress) for which to fetch bin data.
  *
- * @route GET /api/v1/analytics/branchWasteBreakdown?branchId=<branchId>&filter=<filter>
+ * Returns an array of dustbin records including:
+ *  - _id, dustbinType (as binName), currentWeight, binCapacity,
+ *  - isActive flag (true if the bin is not marked as cleaned).
  */
-const branchWasteBreakdown = asyncHandler(async (req, res) => {
-    const { branchId, filter = "today" } = req.query;
-    if (!branchId) {
-        throw new ApiError(400, "branchId is required");
-    }
-
-    // Determine date range based on filter
-    let startDate, endDate;
-    const now = new Date();
-    switch (filter) {
-        case "today":
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-            break;
-        case "thisWeek":
-            startDate = startOfWeek(now);
-            endDate = endOfWeek(now);
-            break;
-        case "lastWeek":
-            const lastWeekDate = subWeeks(now, 1);
-            startDate = startOfWeek(lastWeekDate);
-            endDate = endOfWeek(lastWeekDate);
-            break;
-        case "lastMonth":
-            const lastMonthDate = subMonths(now, 1);
-            startDate = startOfMonth(lastMonthDate);
-            endDate = endOfMonth(lastMonthDate);
-            break;
-        default:
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-    }
-
-    // Aggregation pipeline:
-    // 1. Match waste records within the date range.
-    // 2. Lookup dustbin details.
-    // 3. Unwind the binData array.
-    // 4. Filter records to include only those from the specified branch.
-    // 5. Sort records descending by createdAt.
-    // 6. Group by day and bin type to pick the final record per day for each bin.
-    // 7. Group by bin type to sum the final daily weights.
-    const pipeline = [
-        {
-            $match: {
-                createdAt: { $gte: startDate, $lte: endDate }
-            }
-        },
-        {
-            $lookup: {
-                from: "dustbins",
-                localField: "associateBin",
-                foreignField: "_id",
-                as: "binData"
-            }
-        },
-        { $unwind: "$binData" },
-        {
-            $match: {
-                "binData.branchAddress": new mongoose.Types.ObjectId(branchId)
-            }
-        },
-        // Sort descending so the latest reading for each day appears first.
-        { $sort: { createdAt: -1 } },
-        // Group by day and dustbin type to get the final reading of that day.
-        {
-            $group: {
-                _id: {
-                    day: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    binType: "$binData.dustbinType"
-                },
-                finalWeight: { $first: "$currentWeight" }
-            }
-        },
-        // Group by dustbin type across days to sum up the final weights.
-        {
-            $group: {
-                _id: "$_id.binType",
-                totalWaste: { $sum: "$finalWeight" }
-            }
-        },
-        {
-            $project: {
-                _id: 0,
-                binType: "$_id",
-                totalWaste: 1
-            }
-        }
-    ];
-
-    let breakdownResult;
-    try {
-        breakdownResult = await Waste.aggregate(pipeline);
-    } catch (error) {
-        console.error("Error aggregating branch waste breakdown:", error);
-        throw new ApiError(500, "Error processing branch waste breakdown data");
-    }
-
+export const getBinStatus = asyncHandler(async (req, res) => {
+  const { branchId } = req.query;
+  if (!branchId) {
+    throw new ApiError(400, 'branchId is required');
+  }
+  try {
+    // Find all dustbins associated with the given branch.
+    const bins = await Dustbin.find({ branchAddress: branchId }).lean();
+    // Map bins to include isActive flag (here, assume active if not cleaned).
+    const binStatus = bins.map((bin) => ({
+      _id: bin._id,
+      binName: bin.dustbinType,
+      currentWeight: bin.currentWeight,
+      binCapacity: bin.binCapacity,
+      isActive: !bin.isCleaned, // Adjust logic if needed
+    }));
     return res
-        .status(200)
-        .json(new ApiResponse(200, breakdownResult, "Branch waste breakdown data fetched successfully"));
+      .status(200)
+      .json(new ApiResponse(200, binStatus, 'Bin status data fetched successfully'));
+  } catch (error) {
+    console.error('Error in getBinStatus:', error);
+    throw new ApiError(500, 'Failed to fetch bin status data');
+  }
 });
 
-
 /**
- * dailyDiversionRecycling
- * --------------------------------------------
- * Aggregates daily final waste readings for a specific branch and computes:
- *   - Current Landfill Diversion Rate: (sum of final weights for bins except "General Waste") / (total final weight) * 100
- *   - Current Recycling Rate: (sum of final weights for bins "Commingled" and "Paper & Cardboard") / (total final weight) * 100
- *
- * The aggregation only considers the final reading per day (i.e. the latest reading, typically at 6 PM).
- * Target rates are hardcoded (can be made configurable).
+ * GET /api/v1/analytics/minimalOverview
+ * -------------------------------------------
+ * Retrieves minimal overview data for an employee or bin display user.
  *
  * Query Parameters:
- *   - branchId: (required) the branch's identifier.
- *   - filter: (optional) time filter ("today", "thisWeek", "lastWeek", "lastMonth"; default: today).
+ *  - branchId (required): The ObjectId of the branch.
  *
- * @route GET /api/v1/analytics/dailyDiversionRecycling?branchId=<branchId>&filter=<filter>
+ * Returns an object with:
+ *  - todayWaste: Sum of today's waste (aggregated from Waste entries for this branch).
+ *  - trendData: An array of hourly aggregated waste data for today.
+ *  - branchContribution: The branch's contribution percentage relative to company total waste.
  */
-const dailyDiversionRecycling = asyncHandler(async (req, res) => {
-    const { branchId, filter = "today" } = req.query;
-    if (!branchId) {
-        throw new ApiError(400, "branchId is required");
-    }
-
-    // Determine date range based on filter.
-    let startDate, endDate;
+export const getMinimalOverview = asyncHandler(async (req, res) => {
+  const { branchId } = req.query;
+  if (!branchId) {
+    throw new ApiError(400, 'branchId is required');
+  }
+  try {
     const now = new Date();
-    switch (filter) {
-        case "today":
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-            break;
-        case "thisWeek":
-            startDate = startOfWeek(now);
-            endDate = endOfWeek(now);
-            break;
-        case "lastWeek":
-            const lastWeekDate = subWeeks(now, 1);
-            startDate = startOfWeek(lastWeekDate);
-            endDate = endOfWeek(lastWeekDate);
-            break;
-        case "lastMonth":
-            const lastMonthDate = subMonths(now, 1);
-            startDate = startOfMonth(lastMonthDate);
-            endDate = endOfMonth(lastMonthDate);
-            break;
-        default:
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-    }
+    const todayStart = startOfDay(now);
+    const todayEnd = endOfDay(now);
 
-    // Target rates (can be configured as needed)
-    const targetDiversionRate = 75;  // e.g., 75%
-    const targetRecyclingRate = 80;  // e.g., 80%
-
-    // Aggregation pipeline:
-    // 1. Filter records within the date range.
-    // 2. Lookup dustbin details and filter by branch.
-    // 3. Sort descending to get the final reading per day.
-    // 4. Group by day and dustbin type, taking the first record (i.e. the final reading).
-    // 5. Group by day to sum up:
-    //      - totalWaste: sum of final weights.
-    //      - nonGeneralWaste: sum of final weights for bins not "General Waste".
-    //      - recyclingWaste: sum of final weights for bins "Commingled" or "Paper & Cardboard".
-    // 6. Calculate rates per day and include target values.
-    // 7. Sort results by day ascending.
-    const pipeline = [
-        {
-            $match: {
-                createdAt: { $gte: startDate, $lte: endDate }
-            }
+    // Pipeline to group Waste entries by hour for the branch.
+    const trendPipeline = [
+      {
+        $match: {
+          createdAt: { $gte: todayStart, $lte: todayEnd },
         },
-        {
-            $lookup: {
-                from: "dustbins",
-                localField: "associateBin",
-                foreignField: "_id",
-                as: "binData"
-            }
+      },
+      {
+        // Join with dustbins to filter by branch.
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
         },
-        { $unwind: "$binData" },
-        {
-            $match: {
-                "binData.branchAddress": new mongoose.Types.ObjectId(branchId)
-            }
+      },
+      { $unwind: '$binData' },
+      {
+        $match: {
+          'binData.branchAddress': new mongoose.Types.ObjectId(branchId),
         },
-        // Sort descending by creation time to get the latest reading per day first.
-        { $sort: { createdAt: -1 } },
-        // Group by day and bin type to capture the final reading for each bin on that day.
-        {
-            $group: {
-                _id: {
-                    day: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    binType: "$binData.dustbinType"
-                },
-                finalWeight: { $first: "$currentWeight" }
-            }
+      },
+      {
+        $group: {
+          _id: { hour: { $dateToString: { format: '%H:00', date: '$createdAt' } } },
+          totalWeight: { $sum: '$currentWeight' },
         },
-        // Group by day to sum up values.
-        {
-            $group: {
-                _id: "$_id.day",
-                totalWaste: { $sum: "$finalWeight" },
-                nonGeneralWaste: {
-                    $sum: {
-                        $cond: [
-                            { $ne: ["$_id.binType", "General Waste"] },
-                            "$finalWeight",
-                            0
-                        ]
-                    }
-                },
-                recyclingWaste: {
-                    $sum: {
-                        $cond: [
-                            { $in: ["$_id.binType", ["Commingled", "Paper & Cardboard"]] },
-                            "$finalWeight",
-                            0
-                        ]
-                    }
-                }
-            }
-        },
-        // Project the daily rates.
-        {
-            $project: {
-                _id: 0,
-                date: "$_id",
-                diversionRate: {
-                    $cond: [
-                        { $eq: ["$totalWaste", 0] },
-                        0,
-                        { $multiply: [{ $divide: ["$nonGeneralWaste", "$totalWaste"] }, 100] }
-                    ]
-                },
-                recyclingRate: {
-                    $cond: [
-                        { $eq: ["$totalWaste", 0] },
-                        0,
-                        { $multiply: [{ $divide: ["$recyclingWaste", "$totalWaste"] }, 100] }
-                    ]
-                },
-                targetDiversionRate: { $literal: targetDiversionRate },
-                targetRecyclingRate: { $literal: targetRecyclingRate }
-            }
-        },
-        { $sort: { date: 1 } }
+      },
+      { $sort: { '_id.hour': 1 } },
     ];
+    const trendData = await Waste.aggregate(trendPipeline);
 
-    let dailyData;
-    try {
-        dailyData = await Waste.aggregate(pipeline);
-    } catch (error) {
-        console.error("Error aggregating daily diversion/recycling data:", error);
-        throw new ApiError(500, "Error processing daily diversion/recycling data");
+    // Calculate today's total waste for the branch.
+    const branchWasteAgg = await Waste.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: todayStart, $lte: todayEnd },
+        },
+      },
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
+        },
+      },
+      { $unwind: '$binData' },
+      {
+        $match: {
+          'binData.branchAddress': new mongoose.Types.ObjectId(branchId),
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalBranchWaste: { $sum: '$currentWeight' },
+        },
+      },
+    ]);
+    const todayWaste = branchWasteAgg[0]?.totalBranchWaste || 0;
+
+    // For branchContribution, compute total waste for the company.
+    // First, find the branch record to extract company id.
+    const branch = await BranchAddress.findById(branchId).lean();
+    if (!branch) {
+      throw new ApiError(404, 'Branch not found');
     }
+    const companyId = branch.associatedCompany;
+    // Find all branches for the company.
+    const companyBranches = await BranchAddress.find({ associatedCompany: companyId })
+      .select('_id')
+      .lean();
+    const branchIds = companyBranches.map((b) => b._id);
+    // Aggregate total company waste.
+    const companyWasteAgg = await Waste.aggregate([
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
+        },
+      },
+      { $unwind: '$binData' },
+      {
+        $match: {
+          'binData.branchAddress': { $in: branchIds },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalCompanyWaste: { $sum: '$currentWeight' },
+        },
+      },
+    ]);
+    const totalCompanyWaste = companyWasteAgg[0]?.totalCompanyWaste || 0;
+    const branchContribution = totalCompanyWaste
+      ? Math.round((todayWaste / totalCompanyWaste) * 100)
+      : 0;
 
+    const overview = { todayWaste, trendData, branchContribution };
     return res
-        .status(200)
-        .json(new ApiResponse(200, dailyData, "Daily diversion and recycling data fetched successfully"));
+      .status(200)
+      .json(new ApiResponse(200, overview, 'Minimal overview data fetched successfully'));
+  } catch (error) {
+    console.error('Error in getMinimalOverview:', error);
+    throw new ApiError(500, 'Failed to fetch minimal overview data');
+  }
 });
 
-// ==============================
-// SUPERADMIN DASHBOARD ENDPOINTS
-// ==============================
-
 /**
- * globalSummary
- * --------------------------------------------
- * Aggregates system-wide waste metrics across all companies:
- *   - Total Waste Collected (today)
- *   - Overall Diversion Rate (non-General Waste percentage)
- *   - Overall Recycling Rate (combined percentage for Commingled and Paper & Cardboard)
+ * GET /api/v1/analytics/overview
+ * -------------------------------------------
+ * Retrieves an aggregated overview of metrics for admin dashboards.
  *
  * Query Parameters:
- *   - filter: (optional) "today", "thisWeek", "lastWeek", "lastMonth" (default: today)
+ *  - month (required): The month filter in 'YYYY-MM' format.
+ *  - orgUnitId (optional): Filter by specific organizational unit.
+ *  - companyId (optional): For SuperAdmin to filter by company.
  *
- * @route GET /api/v1/analytics/globalSummary?filter=<filter>
+ * Returns an object with:
+ *  - officeLocations: Count of branch addresses under the selected OrgUnit.
+ *  - wasteBins: Count of dustbins for the branches in the OrgUnit.
+ *  - totalWaste: Aggregated waste for the selected month.
+ *  - diversionRate: Percentage of waste diverted from landfill.
  */
-const globalSummary = asyncHandler(async (req, res) => {
-    const { filter = "today" } = req.query;
-    let startDate, endDate;
-    const now = new Date();
-    // Set date range based on filter.
-    switch (filter) {
-        case "today":
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-            break;
-        case "thisWeek":
-            startDate = startOfWeek(now);
-            endDate = endOfWeek(now);
-            break;
-        case "lastWeek":
-            const lastWeekDate = subWeeks(now, 1);
-            startDate = startOfWeek(lastWeekDate);
-            endDate = endOfWeek(lastWeekDate);
-            break;
-        case "lastMonth":
-            const lastMonthDate = subMonths(now, 1);
-            startDate = startOfMonth(lastMonthDate);
-            endDate = endOfMonth(lastMonthDate);
-            break;
-        default:
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
+export const getOverviewData = asyncHandler(async (req, res) => {
+  const { month, orgUnitId, companyId } = req.query;
+  if (!month) {
+    throw new ApiError(400, 'Month is required in YYYY-MM format');
+  }
+  try {
+    // Compute date range for the given month.
+    const startDate = startOfMonth(new Date(`${month}-01`));
+    const endDate = endOfMonth(new Date(`${month}-01`));
+
+    // Retrieve branch addresses filtered by orgUnit if provided.
+    // If orgUnitId is provided, we assume that branch addresses are linked via OrgUnit.
+    // Otherwise, if companyId is provided or user’s company is used, fetch all branches for that company.
+    let branchFilter = {};
+    if (orgUnitId) {
+      // Find all Branch OrgUnits with parent = orgUnitId or directly matching orgUnitId.
+      const orgUnits = await OrgUnit.find({ parent: orgUnitId, type: 'Branch' })
+        .select('_id')
+        .lean();
+      const branchIds = orgUnits.map((unit) => unit.branchAddress).filter(Boolean);
+      branchFilter = { _id: { $in: branchIds } };
+    } else if (companyId) {
+      branchFilter = { associatedCompany: companyId, isdeleted: false };
     }
 
-    // Build aggregation pipeline (system-wide, no branch filter)
-    const pipeline = [
-        {
-            $match: { createdAt: { $gte: startDate, $lte: endDate } }
-        },
-        {
-            $lookup: {
-                from: "dustbins",
-                localField: "associateBin",
-                foreignField: "_id",
-                as: "binData"
-            }
-        },
-        { $unwind: "$binData" },
-        {
-            $group: {
-                _id: "$binData.dustbinType",
-                totalWaste: { $sum: "$currentWeight" }
-            }
-        },
-        {
-            $project: {
-                _id: 0,
-                binType: "$_id",
-                totalWaste: 1
-            }
-        }
-    ];
+    // Count office locations.
+    const officeLocations = await BranchAddress.countDocuments(branchFilter);
 
-    let summaryData;
-    try {
-        const aggregationResult = await Waste.aggregate(pipeline);
-        // Compute overall totals and rates
-        let overallTotal = 0, nonGeneral = 0, recycled = 0;
-        aggregationResult.forEach(item => {
-            overallTotal += item.totalWaste;
-            if (item.binType !== "General Waste") {
-                nonGeneral += item.totalWaste;
-            }
-            if (["Commingled", "Paper & Cardboard"].includes(item.binType)) {
-                recycled += item.totalWaste;
-            }
-        });
-        const diversionRate = overallTotal ? (nonGeneral / overallTotal) * 100 : 0;
-        const recyclingRate = overallTotal ? (recycled / overallTotal) * 100 : 0;
-        summaryData = { overallTotal, diversionRate, recyclingRate };
-    } catch (error) {
-        console.error("Error in globalSummary:", error);
-        throw new ApiError(500, "Failed to process global summary data");
-    }
+    // Count waste bins for these branches.
+    const branchAddresses = await BranchAddress.find(branchFilter).select('_id').lean();
+    const branchIds = branchAddresses.map((b) => b._id);
+    const wasteBins = await Dustbin.countDocuments({ branchAddress: { $in: branchIds } });
 
-    return res.status(200).json(new ApiResponse(200, summaryData, "Global summary metrics fetched successfully"));
+    // Aggregate total waste for the selected month from Waste entries for these branches.
+    const wasteAgg = await Waste.aggregate([
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
+        },
+      },
+      { $unwind: '$binData' },
+      {
+        $match: {
+          'binData.branchAddress': { $in: branchIds },
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalWaste: { $sum: '$currentWeight' },
+        },
+      },
+    ]);
+    const totalWaste = wasteAgg[0]?.totalWaste || 0;
+
+    // Compute diversionRate as percentage of waste from bins not "General Waste".
+    const diversionAgg = await Waste.aggregate([
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
+        },
+      },
+      { $unwind: '$binData' },
+      {
+        $match: {
+          'binData.branchAddress': { $in: branchIds },
+          createdAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: '$binData.dustbinType',
+          weight: { $sum: '$currentWeight' },
+        },
+      },
+    ]);
+    let nonGeneralWaste = 0;
+    diversionAgg.forEach((item) => {
+      if (item._id !== 'General Waste') {
+        nonGeneralWaste += item.weight;
+      }
+    });
+    const diversionRate = totalWaste ? Math.round((nonGeneralWaste / totalWaste) * 100) : 0;
+
+    const overviewData = { officeLocations, wasteBins, totalWaste, diversionRate };
+    return res
+      .status(200)
+      .json(new ApiResponse(200, overviewData, 'Overview data retrieved successfully'));
+  } catch (error) {
+    console.error('Error in getOverviewData:', error);
+    throw new ApiError(500, 'Failed to fetch overview data');
+  }
 });
 
-
 /**
- * globalDailyWasteTrends
- * --------------------------------------------
- * Aggregates daily waste data system-wide for trend analysis.
+ * GET /api/v1/analytics/wasteByStream
+ * -------------------------------------------
+ * Retrieves time-series waste data grouped by waste stream for a selected month.
  *
  * Query Parameters:
- *   - startDate (optional)
- *   - endDate (optional)
+ *  - month (required): Month in 'YYYY-MM' format.
+ *  - orgUnitId (optional): Filter by OrgUnit.
+ *  - companyId (optional): For SuperAdmin to filter by company.
  *
- * Groups records by day and waste type, then returns time-series data.
- *
- * @route GET /api/v1/analytics/globalDailyWasteTrends?startDate=<startDate>&endDate=<endDate>
+ * Returns an array of data points where each data point contains:
+ *  - date (string)
+ *  - waste amounts for each waste stream (e.g., Landfill, Commingled, Organic, Paper & Cardboard, Glass)
  */
-const globalDailyWasteTrends = asyncHandler(async (req, res) => {
-    let { startDate, endDate } = req.query;
-    // Default to last 30 days if not provided
-    const now = new Date();
-    startDate = startDate ? new Date(startDate) : subMonths(now, 1);
-    endDate = endDate ? new Date(endDate) : now;
+export const getWasteByStream = asyncHandler(async (req, res) => {
+  const { month, orgUnitId, companyId } = req.query;
+  if (!month) {
+    throw new ApiError(400, 'Month is required in YYYY-MM format');
+  }
+  try {
+    const startDate = startOfMonth(new Date(`${month}-01`));
+    const endDate = endOfMonth(new Date(`${month}-01`));
+
+    // Determine branch addresses based on filters
+    let branchFilter = {};
+    if (orgUnitId) {
+      const orgUnits = await OrgUnit.find({ parent: orgUnitId, type: 'Branch' })
+        .select('_id')
+        .lean();
+      const branchIds = orgUnits.map((unit) => unit.branchAddress).filter(Boolean);
+      branchFilter = { _id: { $in: branchIds } };
+    } else if (companyId) {
+      branchFilter = { associatedCompany: companyId, isdeleted: false };
+    }
+
+    const branchAddresses = await BranchAddress.find(branchFilter).select('_id').lean();
+    const branchIds = branchAddresses.map((b) => b._id);
 
     const pipeline = [
-        {
-            $match: { createdAt: { $gte: startDate, $lte: endDate } }
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
         },
-        {
-            $lookup: {
-                from: "dustbins",
-                localField: "associateBin",
-                foreignField: "_id",
-                as: "binData"
-            }
+      },
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
         },
-        { $unwind: "$binData" },
-        {
-            $group: {
-                _id: {
-                    day: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    binType: "$binData.dustbinType"
-                },
-                dailyWaste: { $sum: "$currentWeight" }
-            }
+      },
+      { $unwind: '$binData' },
+      {
+        $match: {
+          'binData.branchAddress': { $in: branchIds },
         },
-        { $sort: { "_id.day": 1 } }
+      },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            binType: '$binData.dustbinType',
+          },
+          totalWeight: { $sum: '$currentWeight' },
+        },
+      },
+      {
+        $group: {
+          _id: '$_id.date',
+          streams: {
+            $push: { binType: '$_id.binType', weight: '$totalWeight' },
+          },
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $project: {
+          _id: 0,
+          date: '$_id',
+          streams: 1,
+        },
+      },
     ];
 
-    let trendData;
-    try {
-        trendData = await Waste.aggregate(pipeline);
-    } catch (error) {
-        console.error("Error aggregating global daily waste trends:", error);
-        throw new ApiError(500, "Failed to fetch global daily waste trends");
-    }
-    return res.status(200).json(new ApiResponse(200, trendData, "Global daily waste trends fetched successfully"));
+    const wasteData = await Waste.aggregate(pipeline);
+    return res
+      .status(200)
+      .json(new ApiResponse(200, wasteData, 'Waste by stream data retrieved successfully'));
+  } catch (error) {
+    console.error('Error in getWasteByStream:', error);
+    throw new ApiError(500, 'Failed to fetch waste by stream data');
+  }
 });
 
-
 /**
- * globalWasteBreakdown
- * --------------------------------------------
- * Aggregates waste data system-wide by waste category using the final daily readings.
- * Designed to feed a donut chart for system-wide waste breakdown.
+ * GET /api/v1/analytics/leaderboard
+ * -------------------------------------------
+ * Retrieves a ranked list of OrgUnits (or branches) based on total waste generated.
  *
  * Query Parameters:
- *   - filter: (optional) time filter ("today", "thisWeek", "lastWeek", "lastMonth"; default: today)
+ *  - month (required): Month in 'YYYY-MM' format.
+ *  - orgUnitId (required): Parent OrgUnit to rank its child units.
+ *  - companyId (optional): For SuperAdmin to filter by company.
  *
- * @route GET /api/v1/analytics/globalWasteBreakdown?filter=<filter>
+ * Returns an array of ranked items, each containing:
+ *  - id, name, totalWaste, and optionally diversionRate.
  */
-const globalWasteBreakdown = asyncHandler(async (req, res) => {
-    const { filter = "today" } = req.query;
-    let startDate, endDate;
-    const now = new Date();
-    switch (filter) {
-        case "today":
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-            break;
-        case "thisWeek":
-            startDate = startOfWeek(now);
-            endDate = endOfWeek(now);
-            break;
-        case "lastWeek":
-            const lastWeekDate = subWeeks(now, 1);
-            startDate = startOfWeek(lastWeekDate);
-            endDate = endOfWeek(lastWeekDate);
-            break;
-        case "lastMonth":
-            const lastMonthDate = subMonths(now, 1);
-            startDate = startOfMonth(lastMonthDate);
-            endDate = endOfMonth(lastMonthDate);
-            break;
-        default:
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-    }
+export const getLeaderboard = asyncHandler(async (req, res) => {
+  const { month, orgUnitId, companyId } = req.query;
+  if (!month || !orgUnitId) {
+    throw new ApiError(400, 'Month and orgUnitId are required');
+  }
+  try {
+    const startDate = startOfMonth(new Date(`${month}-01`));
+    const endDate = endOfMonth(new Date(`${month}-01`));
 
-    // Pipeline similar to branchWasteBreakdown but without branch filtering
+    // Get branch addresses under the specified OrgUnit.
+    // For simplicity, assume OrgUnit contains branchAddress reference.
+    const orgUnit = await OrgUnit.findById(orgUnitId).lean();
+    if (!orgUnit) {
+      throw new ApiError(404, 'OrgUnit not found');
+    }
+    // Find branches under this OrgUnit.
+    const branches = await BranchAddress.find({
+      associatedCompany: companyId || orgUnit.associatedCompany,
+    })
+      .select('_id')
+      .lean();
+    const branchIds = branches.map((b) => b._id);
+
     const pipeline = [
-        {
-            $match: { createdAt: { $gte: startDate, $lte: endDate } }
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
         },
-        {
-            $lookup: {
-                from: "dustbins",
-                localField: "associateBin",
-                foreignField: "_id",
-                as: "binData"
-            }
+      },
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
         },
-        { $unwind: "$binData" },
-        { $sort: { createdAt: -1 } },
-        {
-            $group: {
-                _id: {
-                    day: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    binType: "$binData.dustbinType"
-                },
-                finalWeight: { $first: "$currentWeight" }
-            }
+      },
+      { $unwind: '$binData' },
+      {
+        $match: {
+          'binData.branchAddress': { $in: branchIds },
         },
-        {
-            $group: {
-                _id: "$_id.binType",
-                totalWaste: { $sum: "$finalWeight" }
-            }
+      },
+      {
+        $group: {
+          _id: '$binData.branchAddress',
+          totalWaste: { $sum: '$currentWeight' },
         },
-        {
-            $project: {
-                _id: 0,
-                binType: "$_id",
-                totalWaste: 1
-            }
-        }
+      },
+      {
+        $lookup: {
+          from: 'branchaddresses',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'branchData',
+        },
+      },
+      { $unwind: '$branchData' },
+      {
+        $project: {
+          _id: 1,
+          totalWaste: 1,
+          branchName: '$branchData.officeName',
+        },
+      },
+      { $sort: { totalWaste: -1 } },
     ];
 
-    let breakdownData;
-    try {
-        breakdownData = await Waste.aggregate(pipeline);
-    } catch (error) {
-        console.error("Error aggregating global waste breakdown:", error);
-        throw new ApiError(500, "Failed to fetch global waste breakdown data");
-    }
-    return res.status(200).json(new ApiResponse(200, breakdownData, "Global waste breakdown data fetched successfully"));
+    const leaderboardData = await Waste.aggregate(pipeline);
+    return res
+      .status(200)
+      .json(new ApiResponse(200, leaderboardData, 'Leaderboard data retrieved successfully'));
+  } catch (error) {
+    console.error('Error in getLeaderboard:', error);
+    throw new ApiError(500, 'Failed to fetch leaderboard data');
+  }
 });
-
 
 /**
- * crossCompanyComparison
- * --------------------------------------------
- * Aggregates waste data across companies for system-wide comparison.
- * Steps:
- *  1. Use a date filter (default: today) to limit records.
- *  2. Lookup dustbin details, then join with branch addresses to get company information.
- *  3. Group data by company and sum the waste weights.
- *  4. Return sorted data for comparison.
+ * GET /api/v1/analytics/activityFeed
+ * -------------------------------------------
+ * Retrieves a chronological list of activity events for a selected month and OrgUnit.
  *
- * @route GET /api/v1/analytics/crossCompanyComparison?filter=<filter>
+ * Query Parameters:
+ *  - month (required): Month in 'YYYY-MM' format.
+ *  - orgUnitId (optional): Filter by OrgUnit.
+ *  - companyId (optional): For SuperAdmin to filter by company.
+ *
+ * Returns an array of activity objects, each containing:
+ *  - id, title, description, and timestamp.
  */
-const crossCompanyComparison = asyncHandler(async (req, res) => {
-    const { filter = "today" } = req.query;
-    let startDate, endDate;
-    const now = new Date();
-    switch (filter) {
-        case "today":
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-            break;
-        case "thisWeek":
-            startDate = startOfWeek(now);
-            endDate = endOfWeek(now);
-            break;
-        case "lastWeek":
-            const lastWeekDate = subWeeks(now, 1);
-            startDate = startOfWeek(lastWeekDate);
-            endDate = endOfWeek(lastWeekDate);
-            break;
-        case "lastMonth":
-            const lastMonthDate = subMonths(now, 1);
-            startDate = startOfMonth(lastMonthDate);
-            endDate = endOfMonth(lastMonthDate);
-            break;
-        default:
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-    }
+export const getActivityFeed = asyncHandler(async (req, res) => {
+  const { month, orgUnitId, companyId } = req.query;
+  if (!month) {
+    throw new ApiError(400, 'Month is required in YYYY-MM format');
+  }
+  try {
+    const startDate = startOfMonth(new Date(`${month}-01`));
+    const endDate = endOfMonth(new Date(`${month}-01`));
 
-    // Pipeline to join waste with dustbins, then with branch addresses and companies.
+    // For demonstration, we assume activities are stored in Waste events.
+    // In a real implementation, activities might come from a dedicated collection.
     const pipeline = [
-        {
-            $match: { createdAt: { $gte: startDate, $lte: endDate } }
+      {
+        $match: {
+          createdAt: { $gte: startDate, $lte: endDate },
         },
-        {
-            $lookup: {
-                from: "dustbins",
-                localField: "associateBin",
-                foreignField: "_id",
-                as: "dustbinData"
-            }
+      },
+      // Optionally filter by OrgUnit: this requires joining with dustbins and branchAddresses.
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
         },
-        { $unwind: "$dustbinData" },
-        {
-            $lookup: {
-                from: "branchaddresses",
-                localField: "dustbinData.branchAddress",
-                foreignField: "_id",
-                as: "branchData"
-            }
+      },
+      { $unwind: '$binData' },
+      {
+        $lookup: {
+          from: 'branchaddresses',
+          localField: 'binData.branchAddress',
+          foreignField: '_id',
+          as: 'branchData',
         },
-        { $unwind: "$branchData" },
-        {
-            $group: {
-                _id: "$branchData.associatedCompany",
-                totalWaste: { $sum: "$currentWeight" }
-            }
+      },
+      { $unwind: '$branchData' },
+      // If orgUnitId is provided, filter branches that belong to that OrgUnit.
+      orgUnitId
+        ? {
+            $match: { 'branchData.orgUnit': new mongoose.Types.ObjectId(orgUnitId) },
+          }
+        : { $match: {} },
+      // Optionally filter by companyId.
+      companyId
+        ? {
+            $match: { 'branchData.associatedCompany': new mongoose.Types.ObjectId(companyId) },
+          }
+        : { $match: {} },
+      {
+        $sort: { createdAt: -1 },
+      },
+      {
+        $project: {
+          _id: 1,
+          title: { $literal: 'Activity Event' }, // In real scenario, title and description would be stored.
+          description: { $literal: 'Activity description goes here.' },
+          timestamp: { $dateToString: { format: '%Y-%m-%d %H:%M', date: '$createdAt' } },
         },
-        {
-            $lookup: {
-                from: "companies",
-                localField: "_id",
-                foreignField: "_id",
-                as: "companyData"
-            }
-        },
-        { $unwind: "$companyData" },
-        {
-            $project: {
-                _id: 1,
-                totalWaste: 1,
-                companyName: "$companyData.CompanyName"
-            }
-        },
-        { $sort: { totalWaste: -1 } }
+      },
     ];
 
-    let comparisonData;
-    try {
-        comparisonData = await Waste.aggregate(pipeline);
-    } catch (error) {
-        console.error("Error in crossCompanyComparison:", error);
-        throw new ApiError(500, "Error processing cross-company comparison data");
-    }
-    return res.status(200).json(new ApiResponse(200, comparisonData, "Cross-company comparison data fetched successfully"));
+    const activities = await Waste.aggregate(pipeline);
+    return res
+      .status(200)
+      .json(new ApiResponse(200, activities, 'Activity feed retrieved successfully'));
+  } catch (error) {
+    console.error('Error in getActivityFeed:', error);
+    throw new ApiError(500, 'Failed to fetch activity feed');
+  }
 });
-
-
-/**
- * leaderboards
- * --------------------------------------------
- * Returns a ranked list of companies (or branches) based on key performance indicators,
- * such as total waste collected or recycling rates.
- *
- * This endpoint can be used to quickly identify top performers or outliers.
- *
- * @route GET /api/v1/analytics/leaderboards?filter=<filter>
- */
-const leaderboards = asyncHandler(async (req, res) => {
-    const { filter = "today" } = req.query;
-    let startDate, endDate;
-    const now = new Date();
-    switch (filter) {
-        case "today":
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-            break;
-        case "thisWeek":
-            startDate = startOfWeek(now);
-            endDate = endOfWeek(now);
-            break;
-        case "lastWeek":
-            const lastWeekDate = subWeeks(now, 1);
-            startDate = startOfWeek(lastWeekDate);
-            endDate = endOfWeek(lastWeekDate);
-            break;
-        case "lastMonth":
-            const lastMonthDate = subMonths(now, 1);
-            startDate = startOfMonth(lastMonthDate);
-            endDate = endOfMonth(lastMonthDate);
-            break;
-        default:
-            startDate = startOfDay(now);
-            endDate = endOfDay(now);
-    }
-
-    // Pipeline to compute KPIs for companies and rank them.
-    const pipeline = [
-        {
-            $match: { createdAt: { $gte: startDate, $lte: endDate } }
-        },
-        {
-            $lookup: {
-                from: "dustbins",
-                localField: "associateBin",
-                foreignField: "_id",
-                as: "dustbinData"
-            }
-        },
-        { $unwind: "$dustbinData" },
-        {
-            $lookup: {
-                from: "branchaddresses",
-                localField: "dustbinData.branchAddress",
-                foreignField: "_id",
-                as: "branchData"
-            }
-        },
-        { $unwind: "$branchData" },
-        {
-            $group: {
-                _id: "$branchData.associatedCompany",
-                totalWaste: { $sum: "$currentWeight" }
-            }
-        },
-        {
-            $lookup: {
-                from: "companies",
-                localField: "_id",
-                foreignField: "_id",
-                as: "companyData"
-            }
-        },
-        { $unwind: "$companyData" },
-        {
-            $project: {
-                _id: 1,
-                totalWaste: 1,
-                companyName: "$companyData.CompanyName"
-            }
-        },
-        { $sort: { totalWaste: -1 } }
-    ];
-
-    let leaderboardData;
-    try {
-        leaderboardData = await Waste.aggregate(pipeline);
-    } catch (error) {
-        console.error("Error in leaderboards:", error);
-        throw new ApiError(500, "Error processing leaderboards data");
-    }
-    return res.status(200).json(new ApiResponse(200, leaderboardData, "Leaderboards data fetched successfully"));
-});
-
-// Export the endpoints
-export { branchWasteBreakdown, dailyDiversionRecycling, globalSummary, globalDailyWasteTrends, globalWasteBreakdown, crossCompanyComparison, leaderboards };
-

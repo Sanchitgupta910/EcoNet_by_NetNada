@@ -23,6 +23,10 @@ const dustbinSchema = new mongoose.Schema(
       ref: BranchAddress,
       required: true,
     },
+    isCleaned: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );

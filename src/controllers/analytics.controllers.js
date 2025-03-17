@@ -584,3 +584,70 @@ export const getActivityFeed = asyncHandler(async (req, res) => {
     throw new ApiError(500, 'Failed to fetch activity feed');
   }
 });
+
+/**
+ * GET /api/v1/analytics/wasteLast7Days
+ * Retrieves waste data for the last 7 days (including today).
+ * Each document represents one bin with its daily (last reading) waste data.
+ *
+ * Output example:
+ * [
+ *   {
+ *     _id: "60f...123",        // bin id
+ *     binName: "General Waste", // derived from dustbinType field in Dustbin model
+ *     data: [
+ *       { date: "2023-03-22", weight: 10.5 },
+ *       { date: "2023-03-23", weight: 12.0 },
+ *       ...
+ *     ]
+ *   },
+ *   ...
+ * ]
+ */
+export const getWasteLast7Days = asyncHandler(async (req, res) => {
+  const today = new Date();
+  const startDate = startOfDay(subDays(today, 6)); // 7 days including today
+  const endDate = endOfDay(today);
+
+  const pipeline = [
+    // Match records from the last 7 days
+    { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+    // Lookup dustbin data to get binName from dustbinType field
+    {
+      $lookup: {
+        from: 'dustbins',
+        localField: 'associateBin',
+        foreignField: '_id',
+        as: 'binData',
+      },
+    },
+    { $unwind: '$binData' },
+    // Group by bin and day: for each day take the last reading for that bin
+    {
+      $group: {
+        _id: {
+          bin: '$associateBin',
+          date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+        },
+        weight: { $last: '$currentWeight' },
+        binName: { $first: '$binData.dustbinType' }, // use dustbinType as the bin name
+      },
+    },
+    { $sort: { '_id.date': 1 } },
+    // Group by bin to collect the daily data points in an array
+    {
+      $group: {
+        _id: '$_id.bin',
+        binName: { $first: '$binName' },
+        data: { $push: { date: '$_id.date', weight: '$weight' } },
+      },
+    },
+    { $sort: { binName: 1 } }, // Optional: sort bins by name
+  ];
+
+  const wasteData = await Waste.aggregate(pipeline);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, wasteData, 'Waste data for last 7 days retrieved successfully'));
+});

@@ -587,32 +587,41 @@ export const getActivityFeed = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/v1/analytics/wasteLast7Days
- * Retrieves waste data for the last 7 days (including today).
- * Each document represents one bin with its daily (last reading) waste data.
+ * Retrieves waste data for the last 7 days (including today) for bins belonging to a specific branch.
  *
- * Output example:
+ * Query Parameters:
+ *   - branchId (required): The ObjectId of the branch (i.e., BranchAddress _id).
+ *
+ * Response format (each document represents one bin):
  * [
  *   {
- *     _id: "60f...123",        // bin id
- *     binName: "General Waste", // derived from dustbinType field in Dustbin model
+ *     _id: <bin id>,
+ *     binName: "General Waste",  // from Dustbin.dustbinType
  *     data: [
  *       { date: "2023-03-22", weight: 10.5 },
  *       { date: "2023-03-23", weight: 12.0 },
- *       ...
+ *       // ... one document per day for the last 7 days
  *     ]
  *   },
  *   ...
  * ]
  */
 export const getWasteLast7Days = asyncHandler(async (req, res) => {
+  const { branchId } = req.query;
+  if (!branchId) {
+    throw new ApiError(400, 'branchId is required');
+  }
+
+  // Calculate date range for the last 7 days (including today)
   const today = new Date();
-  const startDate = startOfDay(subDays(today, 6)); // 7 days including today
+  const startDate = startOfDay(subDays(today, 6)); // 6 days ago plus today = 7 days
   const endDate = endOfDay(today);
 
+  // Aggregation pipeline:
   const pipeline = [
-    // Match records from the last 7 days
+    // Only consider waste records in the date range
     { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
-    // Lookup dustbin data to get binName from dustbinType field
+    // Lookup corresponding dustbin data to get dustbinType and branchAddress
     {
       $lookup: {
         from: 'dustbins',
@@ -622,7 +631,15 @@ export const getWasteLast7Days = asyncHandler(async (req, res) => {
       },
     },
     { $unwind: '$binData' },
-    // Group by bin and day: for each day take the last reading for that bin
+    // Filter only bins belonging to the given branchId
+    {
+      $match: {
+        'binData.branchAddress': new mongoose.Types.ObjectId(branchId),
+      },
+    },
+    // Sort by createdAt in ascending order
+    { $sort: { createdAt: 1 } },
+    // Group by bin and by day: for each bin and each day, pick the last reading.
     {
       $group: {
         _id: {
@@ -630,11 +647,10 @@ export const getWasteLast7Days = asyncHandler(async (req, res) => {
           date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
         },
         weight: { $last: '$currentWeight' },
-        binName: { $first: '$binData.dustbinType' }, // use dustbinType as the bin name
+        binName: { $first: '$binData.dustbinType' },
       },
     },
-    { $sort: { '_id.date': 1 } },
-    // Group by bin to collect the daily data points in an array
+    // Group again by bin so that each bin has an array of daily readings.
     {
       $group: {
         _id: '$_id.bin',
@@ -642,7 +658,8 @@ export const getWasteLast7Days = asyncHandler(async (req, res) => {
         data: { $push: { date: '$_id.date', weight: '$weight' } },
       },
     },
-    { $sort: { binName: 1 } }, // Optional: sort bins by name
+    // Sort the output by binName (optional)
+    { $sort: { binName: 1 } },
   ];
 
   const wasteData = await Waste.aggregate(pipeline);
@@ -650,4 +667,106 @@ export const getWasteLast7Days = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, wasteData, 'Waste data for last 7 days retrieved successfully'));
+});
+
+/**
+ * GET /api/v1/analytics/wasteTrendComparison
+ * Retrieves a comparison of waste generation between two consecutive 7-day periods:
+ *   - This week: total waste generated in the last 7 days (including today)
+ *   - Last week: total waste generated in the 7 days prior to that
+ *
+ * For each bin and for each day in the period, only the last record is considered.
+ * Returns an object with:
+ *   - thisWeekWaste: total waste (in KG) for the current 7-day period
+ *   - lastWeekWaste: total waste (in KG) for the previous 7-day period
+ *   - percentageChange: percentage change ((thisWeek - lastWeek) / lastWeek * 100)
+ *   - trend: a string indicating whether this week is "higher" or "lower" (or "no change")
+ */
+export const getWasteTrendComparison = asyncHandler(async (req, res) => {
+  const { branchId } = req.query;
+  if (!branchId) {
+    throw new ApiError(400, 'branchId is required');
+  }
+  try {
+    const today = new Date();
+    // Define the period for this week (last 7 days including today)
+    const thisWeekStart = startOfDay(subDays(today, 6));
+    const thisWeekEnd = endOfDay(today);
+    // Define the period for last week (the 7 days preceding this week)
+    const lastWeekStart = startOfDay(subDays(today, 13));
+    const lastWeekEnd = endOfDay(subDays(today, 7));
+
+    // Helper function to aggregate total waste for a given period.
+    // For each bin and each day, only the latest record is used.
+    const aggregateWasteForPeriod = async (startDate, endDate) => {
+      const pipeline = [
+        { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+        {
+          $lookup: {
+            from: 'dustbins',
+            localField: 'associateBin',
+            foreignField: '_id',
+            as: 'binData',
+          },
+        },
+        { $unwind: '$binData' },
+        { $match: { 'binData.branchAddress': new mongoose.Types.ObjectId(branchId) } },
+        // Sort descending so the latest record for each bin/day comes first
+        { $sort: { createdAt: -1 } },
+        // Group by bin and day, taking the first record from the sorted results.
+        {
+          $group: {
+            _id: {
+              bin: '$associateBin',
+              day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            },
+            latestWeight: { $first: '$currentWeight' },
+          },
+        },
+        // Sum the latestWeight from all groups to get the total waste for the period.
+        {
+          $group: {
+            _id: null,
+            totalWaste: { $sum: '$latestWeight' },
+          },
+        },
+      ];
+      const result = await Waste.aggregate(pipeline);
+      return result[0]?.totalWaste || 0;
+    };
+
+    const thisWeekWaste = await aggregateWasteForPeriod(thisWeekStart, thisWeekEnd);
+    const lastWeekWaste = await aggregateWasteForPeriod(lastWeekStart, lastWeekEnd);
+
+    // Calculate percentage change and determine the trend.
+    let percentageChange = 0;
+    let trend = 'no change';
+    if (lastWeekWaste > 0) {
+      percentageChange = ((thisWeekWaste - lastWeekWaste) / lastWeekWaste) * 100;
+      trend =
+        thisWeekWaste > lastWeekWaste
+          ? 'higher'
+          : thisWeekWaste < lastWeekWaste
+          ? 'lower'
+          : 'equal';
+    } else {
+      // If last week's waste is zero, then if this week's waste is greater than 0, consider it an increase.
+      percentageChange = thisWeekWaste > 0 ? 100 : 0;
+      trend = thisWeekWaste > 0 ? 'higher' : 'no change';
+    }
+
+    const data = {
+      thisWeekWaste,
+      lastWeekWaste,
+      percentageChange: Math.round(percentageChange * 100) / 100, // Rounded to 2 decimals
+      trend,
+    };
+
+    return res
+      .status(200)
+      .json(new ApiResponse(200, data, 'Waste trend comparison data retrieved successfully'));
+  } catch (error) {
+    console.error('Error in getWasteTrendComparison:', error);
+    throw new ApiError(500, 'Failed to fetch waste trend comparison data');
+  }
 });

@@ -8,7 +8,8 @@ import {
   getWasteByStream,
   getLeaderboard,
   getActivityFeed,
-  getWasteLast7Days, // Newly added controller
+  getWasteLast7Days,
+  getWasteTrendComparison,
 } from '../controllers/analytics.controllers.js';
 
 // Create a new router instance
@@ -71,5 +72,12 @@ router.get('/latestBinWeight', verifyJWT, getLatestBinWeight);
  * Retrieves waste data for the last 7 days for each bin.
  */
 router.get('/wasteLast7Days', verifyJWT, getWasteLast7Days);
+
+/**
+ * GET /api/v1/analytics/wasteTrendComparison
+ * Retrieves a comparison of waste generation between two consecutive 7-day periods.
+ * Expects query parameter: branchId
+ */
+router.get('/wasteTrendComparison', verifyJWT, getWasteTrendComparison);
 
 export default router;

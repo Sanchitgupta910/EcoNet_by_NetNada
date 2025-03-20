@@ -148,12 +148,11 @@ export const createOrgUnitsForBranchAddressService = async ({
   country,
   branchAddressId,
 }) => {
-  // Format names with the company name as prefix.
-  const countryName = `${companyName}_${country.trim()}`;
-  const regionName =
-    subdivision && subdivision.trim() !== '' ? `${companyName}_${subdivision.trim()}` : null;
-  const cityName = `${companyName}_${city.trim()}`;
-  const branchUnitName = `${companyName}_${officeName.trim()}`;
+  // Format names without the company name as prefix.
+  const countryName = country.trim();
+  const regionName = subdivision && subdivision.trim() !== '' ? subdivision.trim() : null;
+  const cityName = city.trim();
+  const branchUnitName = officeName.trim();
 
   // --- Country Level ---
   let countryUnit;

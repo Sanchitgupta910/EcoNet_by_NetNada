@@ -2,6 +2,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
 import { OrgUnit } from '../models/orgUnit.model.js';
 import { ApiResponse } from '../utils/ApiResponse.js';
+import { Company } from '../models/company.models.js';
 
 /**
  * createOrgUnit
@@ -281,21 +282,49 @@ const createOrgUnitsForBranchAddress = asyncHandler(async (req, res) => {
  * @route GET /api/v1/orgUnits/byType
  */
 const getOrgUnitsByType = asyncHandler(async (req, res) => {
-  const { type } = req.query;
+  const { type, companyId } = req.query;
   if (!type) {
     throw new ApiError(400, 'OrgUnit type query parameter is required');
   }
 
   let units;
   try {
-    units = await OrgUnit.find({ type: type.trim() }).populate('branchAddress').lean();
+    if (type.trim() === 'Branch' && companyId) {
+      // For Branch type, populate the branchAddress and filter by associatedCompany.
+      units = await OrgUnit.find({ type: 'Branch' })
+        .populate({
+          path: 'branchAddress',
+          match: { associatedCompany: companyId },
+        })
+        .lean();
+
+      // Remove units where branchAddress did not match.
+      units = units.filter((unit) => unit.branchAddress);
+    } else if (companyId && ['Country', 'Region', 'City'].includes(type.trim())) {
+      // For hierarchical types, fetch the company to derive the name prefix.
+      const company = await Company.findById(companyId).lean();
+      if (!company) {
+        throw new ApiError(404, 'Company not found');
+      }
+      // Assuming the naming convention used during OrgUnit creation, e.g. "Acme_US" for a country.
+      const prefix = company.CompanyName + '_';
+      // Filter OrgUnits of the given type whose name starts with the company name prefix.
+      units = await OrgUnit.find({
+        type: type.trim(),
+        name: { $regex: '^' + prefix },
+      })
+        .populate('parent') // Optional: populate parent for hierarchical context.
+        .lean();
+    } else {
+      // For other cases (or if companyId is not provided), simply fetch by type.
+      units = await OrgUnit.find({ type: type.trim() }).populate('branchAddress').lean();
+    }
   } catch (error) {
     throw new ApiError(500, 'Error retrieving OrgUnits: ' + error.message);
   }
 
   return res.status(200).json(new ApiResponse(200, units, 'OrgUnits retrieved successfully'));
 });
-
 export {
   createOrgUnit,
   getOrgUnit,

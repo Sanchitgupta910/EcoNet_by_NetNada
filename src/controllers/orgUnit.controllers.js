@@ -89,13 +89,11 @@ export const getOrgUnitTree = asyncHandler(async (req, res) => {
     }
   });
 
-  return res
-    .status(200)
-    .json({
-      success: true,
-      data: tree,
-      message: 'Organizational structure retrieved successfully',
-    });
+  return res.status(200).json({
+    success: true,
+    data: tree,
+    message: 'Organizational structure retrieved successfully',
+  });
 });
 
 /**
@@ -130,14 +128,13 @@ export const createOrgUnitsForBranchAddressService = async ({
   }
 
   // Create a standardized naming prefix (optional).
-  const prefix = companyName.trim() + '_';
 
   let countryUnit, regionUnit, cityUnit, branchUnit;
 
   try {
     // --- Country Level ---
-    // Use the prefix in the name if desired (e.g., "Google_Australia")
-    const countryName = prefix + country.trim();
+
+    const countryName = country.trim();
     countryUnit = await OrgUnit.findOne({ name: countryName, type: 'Country', company: companyId });
     if (!countryUnit) {
       countryUnit = await OrgUnit.create({
@@ -149,7 +146,7 @@ export const createOrgUnitsForBranchAddressService = async ({
     }
 
     // --- Region Level (Optional) ---
-    let regionName = subdivision && subdivision.trim() !== '' ? prefix + subdivision.trim() : null;
+    let regionName = subdivision && subdivision.trim() !== '' ? subdivision.trim() : null;
     if (regionName) {
       regionUnit = await OrgUnit.findOne({
         name: regionName,
@@ -187,7 +184,7 @@ export const createOrgUnitsForBranchAddressService = async ({
 
     // --- Branch Level ---
     // For branch, we store the branchAddress reference as well.
-    const branchUnitName = prefix + officeName.trim();
+    const branchUnitName = officeName.trim();
     branchUnit = await OrgUnit.findOne({
       name: branchUnitName,
       type: 'Branch',
@@ -234,13 +231,11 @@ export const createOrgUnitsForBranchAddress = asyncHandler(async (req, res) => {
     country,
     branchAddressId,
   });
-  return res
-    .status(201)
-    .json({
-      success: true,
-      data: orgUnits,
-      message: 'Organizational hierarchy for branch created successfully',
-    });
+  return res.status(201).json({
+    success: true,
+    data: orgUnits,
+    message: 'Organizational hierarchy for branch created successfully',
+  });
 });
 
 /**

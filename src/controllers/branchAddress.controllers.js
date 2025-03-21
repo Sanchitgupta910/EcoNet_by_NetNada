@@ -72,6 +72,7 @@ const createNewAddress = asyncHandler(async (req, res) => {
     // Automatically create the OrgUnit hierarchy for the new branch.
     // Pass companyName along with other branch details so that OrgUnit names are properly formatted.
     const orgUnits = await createOrgUnitsForBranchAddressService({
+      companyId: associatedCompany,
       companyName,
       officeName: branchRecord.officeName,
       city: branchRecord.city,

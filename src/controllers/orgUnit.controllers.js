@@ -127,8 +127,6 @@ export const createOrgUnitsForBranchAddressService = async ({
     throw new ApiError(400, 'Missing required parameters for creating OrgUnits');
   }
 
-  // Create a standardized naming prefix (optional).
-
   let countryUnit, regionUnit, cityUnit, branchUnit;
 
   try {
@@ -165,7 +163,7 @@ export const createOrgUnitsForBranchAddressService = async ({
     }
 
     // --- City Level ---
-    const cityName = prefix + city.trim();
+    const cityName = city.trim();
     const parentForCity = regionUnit ? regionUnit._id : countryUnit._id;
     cityUnit = await OrgUnit.findOne({
       name: cityName,

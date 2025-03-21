@@ -479,15 +479,29 @@ export const getAdminOverview = asyncHandler(async (req, res) => {
  */
 export const getWasteTrendChart = asyncHandler(async (req, res) => {
   const { branchId, days } = req.query;
+
+  // Validate branchId presence and format
   if (!branchId) {
     throw new ApiError(400, 'branchId is required');
   }
+  if (!mongoose.Types.ObjectId.isValid(branchId)) {
+    throw new ApiError(400, 'Invalid branchId format');
+  }
+  if (branchId === 'defaultBranchId') {
+    throw new ApiError(400, 'A valid branchId must be provided');
+  }
+
+  // Determine number of days (default 7)
   const numDays = days ? parseInt(days) : 7;
   const endDate = endOfDay(new Date());
   const startDate = subDays(endDate, numDays - 1);
 
+  // Construct the aggregation pipeline:
   const pipeline = [
+    // 1. Filter records in the specified date range
     { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+
+    // 2. Lookup dustbin details using associateBin field
     {
       $lookup: {
         from: 'dustbins',
@@ -496,31 +510,50 @@ export const getWasteTrendChart = asyncHandler(async (req, res) => {
         as: 'binData',
       },
     },
+
+    // 3. Unwind the binData array so each waste record is paired with its dustbin details
     { $unwind: '$binData' },
+
+    // 4. Match only those records where the dustbin's branchAddress matches the provided branchId
     { $match: { 'binData.branchAddress': mongoose.Types.ObjectId(branchId) } },
+
+    // 5. Sort records by createdAt in ascending order
     { $sort: { createdAt: 1 } },
+
+    // 6. Group by bin and by date:
+    //    - Use $dateToString to format createdAt as 'YYYY-MM-DD'
+    //    - Use $last to take the last (latest) currentWeight of the day for each bin
+    //    - Preserve the bin type using $first since it is constant per bin.
     {
       $group: {
         _id: {
           bin: '$associateBin',
           date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
         },
-        weight: { $last: '$currentWeight' }, // Using the last record of the day
+        weight: { $last: '$currentWeight' },
+        binType: { $first: '$binData.dustbinType' },
       },
     },
+
+    // 7. Group again by bin to compile an array of daily readings and preserve the bin type.
     {
       $group: {
         _id: '$_id.bin',
         data: { $push: { date: '$_id.date', weight: '$weight' } },
-        binType: { $first: '$binData.dustbinType' }, // assuming all records for a bin have same type
+        binType: { $first: '$binType' },
       },
     },
   ];
 
-  const trendData = await Waste.aggregate(pipeline);
-  return res
-    .status(200)
-    .json(new ApiResponse(200, trendData, 'Waste trend chart data retrieved successfully'));
+  try {
+    const trendData = await Waste.aggregate(pipeline);
+    return res
+      .status(200)
+      .json(new ApiResponse(200, trendData, 'Waste trend chart data retrieved successfully'));
+  } catch (error) {
+    console.error('Error in getWasteTrendChart:', error);
+    throw new ApiError(500, 'Failed to fetch waste trend chart data');
+  }
 });
 
 /**
@@ -574,16 +607,12 @@ export const getActivityFeed = asyncHandler(async (req, res) => {
  * For demonstration, we rank based on total waste (using the last reading per bin).
  */
 export const getAdminLeaderboard = asyncHandler(async (req, res) => {
-  // Expect branchId for office-level leaderboard; if not provided, assume company-level ranking for SuperAdmin.
   const { branchId, companyId } = req.query;
 
-  // If branchId is provided, rank offices; otherwise, rank companies.
+  // If branchId is provided, assume office-level leaderboard.
   if (branchId) {
-    // Rank offices within a company.
     const leaderboardPipeline = [
-      {
-        $match: { createdAt: { $gte: startOfDay(new Date()), $lte: endOfDay(new Date()) } },
-      },
+      { $match: { createdAt: { $gte: startOfDay(new Date()), $lte: endOfDay(new Date()) } } },
       {
         $lookup: {
           from: 'dustbins',
@@ -615,10 +644,15 @@ export const getAdminLeaderboard = asyncHandler(async (req, res) => {
         new ApiResponse(200, leaderboardData, 'Office leaderboard data retrieved successfully'),
       );
   } else if (companyId) {
-    // Rank companies. For demonstration, we aggregate waste for each company.
-    const branches = await BranchAddress.find({ associatedCompany: companyId })
-      .select('_id')
-      .lean();
+    // If companyId equals "all", we remove the company filter.
+    let filter = {};
+    if (companyId !== 'all') {
+      if (!mongoose.Types.ObjectId.isValid(companyId)) {
+        throw new ApiError(400, 'Invalid companyId format');
+      }
+      filter.associatedCompany = mongoose.Types.ObjectId(companyId);
+    }
+    const branches = await BranchAddress.find(filter).select('_id').lean();
     const branchIds = branches.map((b) => b._id);
     const companyLeaderboardPipeline = [
       { $match: { createdAt: { $gte: startOfDay(new Date()), $lte: endOfDay(new Date()) } } },

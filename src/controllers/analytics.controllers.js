@@ -409,7 +409,7 @@ export const getAdminOverview = asyncHandler(async (req, res) => {
   // Build filter for BranchAddress if filtering by company
   let branchFilter = {};
   if (companyId) {
-    branchFilter.associatedCompany = mongoose.Types.ObjectId(companyId);
+    branchFilter.associatedCompany = new mongoose.Types.ObjectId(companyId);
     branchFilter.isdeleted = false;
   }
 
@@ -650,7 +650,7 @@ export const getAdminLeaderboard = asyncHandler(async (req, res) => {
       if (!mongoose.Types.ObjectId.isValid(companyId)) {
         throw new ApiError(400, 'Invalid companyId format');
       }
-      filter.associatedCompany = mongoose.Types.ObjectId(companyId);
+      filter.associatedCompany = new mongoose.Types.ObjectId(companyId);
     }
     const branches = await BranchAddress.find(filter).select('_id').lean();
     const branchIds = branches.map((b) => b._id);

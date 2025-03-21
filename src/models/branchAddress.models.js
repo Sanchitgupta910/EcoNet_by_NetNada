@@ -46,4 +46,6 @@ const branchAddressSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+//Creating a compound index for faster queries
+branchAddressSchema.index({ associatedCompany: 1 });
 export const BranchAddress = mongoose.model('BranchAddress', branchAddressSchema);

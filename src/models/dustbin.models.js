@@ -23,12 +23,10 @@ const dustbinSchema = new mongoose.Schema(
       ref: BranchAddress,
       required: true,
     },
-    isCleaned: {
-      type: Boolean,
-      default: false,
-    },
   },
   { timestamps: true },
 );
 
+//Creating a compound index for faster queries
+dustbinSchema.index({ branchAddress: 1 });
 export const Dustbin = mongoose.model('Dustbin', dustbinSchema);

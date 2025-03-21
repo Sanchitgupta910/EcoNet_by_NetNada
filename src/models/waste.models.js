@@ -17,8 +17,14 @@ const wasteSchema = new mongoose.Schema(
       enum: ['disposal', 'cleaning'],
       default: 'disposal',
     },
+    isCleaned: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true },
 );
 
+//Creating a compound index for faster queries
+wasteSchema.index({ createdAt: 1, associateBin: 1 });
 export const Waste = mongoose.model('Waste', wasteSchema);

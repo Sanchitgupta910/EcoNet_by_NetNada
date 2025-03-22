@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
 import { OrgUnit } from '../models/orgUnit.model.js';
 import { Company } from '../models/company.models.js';
 
@@ -278,4 +279,87 @@ export const getOrgUnitsByType = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json({ success: true, data: units, message: 'OrgUnits retrieved successfully' });
+});
+
+/**
+ * GET /api/v1/orgUnits/grouped
+ * Returns distinct OrgUnits grouped by their type.
+ * For OrgUnits of type "Branch", only returns those where the associated BranchAddress (via lookup)
+ * has an associatedCompany matching the provided companyId.
+ * Logs inputs and outputs for debugging.
+ */
+export const getGroupedOrgUnits = asyncHandler(async (req, res) => {
+  const { companyId } = req.query;
+  console.log('[getGroupedOrgUnits] Called with companyId:', companyId);
+  let groupedData;
+  try {
+    if (companyId) {
+      if (!mongoose.Types.ObjectId.isValid(companyId)) {
+        console.error('[getGroupedOrgUnits] Invalid companyId:', companyId);
+        throw new ApiError(400, 'Invalid companyId format');
+      }
+      groupedData = await OrgUnit.aggregate([
+        {
+          $lookup: {
+            from: 'branchaddresses', // Ensure this matches your actual collection name
+            localField: 'branchAddress',
+            foreignField: '_id',
+            as: 'branchInfo',
+          },
+        },
+        { $unwind: { path: '$branchInfo', preserveNullAndEmptyArrays: true } },
+        {
+          $match: {
+            $or: [
+              { type: { $ne: 'Branch' } },
+              { 'branchInfo.associatedCompany': new mongoose.Types.ObjectId(companyId) },
+            ],
+          },
+        },
+        {
+          $group: {
+            _id: { type: '$type', name: '$name' },
+            orgUnit: { $first: '$$ROOT' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.type',
+            units: { $push: '$orgUnit' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]);
+      console.log(
+        '[getGroupedOrgUnits] Grouped data (with companyId):',
+        JSON.stringify(groupedData, null, 2),
+      );
+    } else {
+      groupedData = await OrgUnit.aggregate([
+        {
+          $group: {
+            _id: { type: '$type', name: '$name' },
+            orgUnit: { $first: '$$ROOT' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.type',
+            units: { $push: '$orgUnit' },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]);
+      console.log(
+        '[getGroupedOrgUnits] Grouped data (without companyId):',
+        JSON.stringify(groupedData, null, 2),
+      );
+    }
+    return res
+      .status(200)
+      .json(new ApiResponse(200, groupedData, 'Grouped OrgUnits retrieved successfully'));
+  } catch (error) {
+    console.error('[getGroupedOrgUnits] Error:', error);
+    throw new ApiError(500, 'Error retrieving grouped OrgUnits: ' + error.message);
+  }
 });

@@ -330,10 +330,10 @@ export const getGroupedOrgUnits = asyncHandler(async (req, res) => {
         },
         { $sort: { _id: 1 } },
       ]);
-      console.log(
-        '[getGroupedOrgUnits] Grouped data (with companyId):',
-        JSON.stringify(groupedData, null, 2),
-      );
+      // console.log(
+      //   '[getGroupedOrgUnits] Grouped data (with companyId):',
+      //   JSON.stringify(groupedData, null, 2),
+      // );
     } else {
       groupedData = await OrgUnit.aggregate([
         {

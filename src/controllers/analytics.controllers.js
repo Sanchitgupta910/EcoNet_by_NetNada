@@ -5,7 +5,7 @@ import { ApiResponse } from '../utils/ApiResponse.js';
 import { Waste } from '../models/waste.models.js';
 import { Dustbin } from '../models/dustbin.models.js';
 import { BranchAddress } from '../models/branchAddress.models.js';
-import { OrgUnit } from '../models/orgUnit.model.js ';
+import { OrgUnit } from '../models/orgUnit.model.js';
 import {
   startOfDay,
   endOfDay,
@@ -19,10 +19,8 @@ import {
 } from 'date-fns';
 
 /**
- * Helper function to compute date range based on a filter.
- * @param {string} filter - one of "today", "thisWeek", "thisMonth", "lastMonth"
- * @param {Date} now - current date
- * @returns {Object} - { startDate, endDate }
+ * getDateRangeFromFilter:
+ * Returns the start and end dates based on the provided filter.
  */
 const getDateRangeFromFilter = (filter, now = new Date()) => {
   let startDate, endDate;
@@ -50,40 +48,31 @@ const getDateRangeFromFilter = (filter, now = new Date()) => {
       endDate = endOfDay(now);
       break;
   }
-  return { startDate: new Date(startDate), endDate: new Date(endDate) };
+  return { startDate, endDate };
 };
 
 /**
- * Helper function to compute the previous period's date range based on the current filter.
- * Rules:
- *   - If filter is "today": use yesterday.
- *   - If filter is "thisWeek": use last week.
- *   - If filter is "thisMonth": use last month.
- *   - If filter is "lastMonth": compare to this month.
+ * getPreviousDateRange:
+ * Returns the previous period's date range based on the current filter.
  */
 const getPreviousDateRange = (filter, now = new Date()) => {
   let previousStartDate, previousEndDate;
   switch (filter) {
     case 'today':
-      // Yesterday's range
       previousStartDate = startOfDay(subDays(now, 1));
       previousEndDate = endOfDay(subDays(now, 1));
       break;
     case 'thisWeek':
-      // Last week's range
       previousStartDate = startOfWeek(subDays(now, 7), { weekStartsOn: 1 });
       previousEndDate = endOfWeek(subDays(now, 7), { weekStartsOn: 1 });
       break;
-    case 'thisMonth':
-      // Last month's range
-      {
-        const lastMonthDate = subMonths(now, 1);
-        previousStartDate = startOfMonth(lastMonthDate);
-        previousEndDate = endOfMonth(lastMonthDate);
-      }
+    case 'thisMonth': {
+      const lastMonthDate = subMonths(now, 1);
+      previousStartDate = startOfMonth(lastMonthDate);
+      previousEndDate = endOfMonth(lastMonthDate);
       break;
+    }
     case 'lastMonth':
-      // For "lastMonth" filter, compare to this month's data.
       previousStartDate = startOfMonth(now);
       previousEndDate = endOfMonth(now);
       break;
@@ -92,54 +81,38 @@ const getPreviousDateRange = (filter, now = new Date()) => {
       previousEndDate = endOfDay(subDays(now, 1));
       break;
   }
-  return {
-    previousStartDate: new Date(previousStartDate),
-    previousEndDate: new Date(previousEndDate),
-  };
+  return { previousStartDate, previousEndDate };
 };
 
 /**
- * Aggregation pipeline function to compute cumulative waste for a given date range.
- * For each bin, on each day in the range, only the latest (most recent) reading is used.
- * Returns an object with two properties:
- *   - totalWaste: Sum of daily last readings for all bins.
- *   - landfillDiversion: Sum of daily last readings for bins not labeled "General Waste".
+ * aggregateWasteData:
+ * Aggregates waste data over a date range for the given branchIds.
  *
- * @param {Date} rangeStart - Start date of the range.
- * @param {Date} rangeEnd - End date of the range.
- * @param {Array} branchIds - Array of BranchAddress _id values to filter bins.
+ * For each bin on each day, it selects the latest reading and sums these up.
+ *
+ * Formulas:
+ *   totalWaste = Σ (latest reading per bin per day)
+ *   landfillDiversion = Σ (latest reading per bin per day for bins with dustbinType !== "General Waste")
+ *
+ * Returns an object: { totalWaste, landfillDiversion }
  */
 const aggregateWasteData = async (rangeStart, rangeEnd, branchIds) => {
   const wasteAgg = await Waste.aggregate([
-    // Match waste records within the date range.
-    {
-      $match: {
-        createdAt: { $gte: rangeStart, $lte: rangeEnd },
-      },
-    },
-    // Create a 'day' field in YYYY-MM-DD format.
-    {
-      $addFields: {
-        day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-      },
-    },
-    // Sort by bin and by createdAt descending.
+    { $match: { createdAt: { $gte: rangeStart, $lte: rangeEnd } } },
+    { $addFields: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } } },
     { $sort: { associateBin: 1, createdAt: -1 } },
-    // Group by bin and day: pick the first record (the latest) for each bin/day.
     {
       $group: {
         _id: { associateBin: '$associateBin', day: '$day' },
         latestWaste: { $first: '$currentWeight' },
       },
     },
-    // Group by bin: sum the daily latest readings.
     {
       $group: {
         _id: '$_id.associateBin',
         cumulativeWaste: { $sum: '$latestWaste' },
       },
     },
-    // Lookup dustbin details.
     {
       $lookup: {
         from: 'dustbins',
@@ -149,15 +122,9 @@ const aggregateWasteData = async (rangeStart, rangeEnd, branchIds) => {
       },
     },
     { $unwind: '$binDetails' },
-    // Only include bins that belong to the filtered branches.
-    {
-      $match: {
-        'binDetails.branchAddress': { $in: branchIds },
-      },
-    },
+    { $match: { 'binDetails.branchAddress': { $in: branchIds } } },
   ]);
 
-  // Calculate aggregated values.
   let totalWaste = 0,
     landfillDiversion = 0;
   wasteAgg.forEach((record) => {
@@ -169,13 +136,57 @@ const aggregateWasteData = async (rangeStart, rangeEnd, branchIds) => {
   return { totalWaste, landfillDiversion };
 };
 
-/********************* Basic Endpoints ***************************/
+/**
+ * aggregateRecyclingWasteData:
+ * Aggregates waste data over a date range, but only for bins where dustbinType === "Recycling".
+ *
+ * Returns the total recycling waste computed as the sum of the latest reading per recycling bin per day.
+ */
+const aggregateRecyclingWasteData = async (rangeStart, rangeEnd, branchIds) => {
+  const wasteAgg = await Waste.aggregate([
+    { $match: { createdAt: { $gte: rangeStart, $lte: rangeEnd } } },
+    { $addFields: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } } },
+    { $sort: { associateBin: 1, createdAt: -1 } },
+    {
+      $group: {
+        _id: { associateBin: '$associateBin', day: '$day' },
+        latestWaste: { $first: '$currentWeight' },
+      },
+    },
+    {
+      $group: {
+        _id: '$_id.associateBin',
+        cumulativeWaste: { $sum: '$latestWaste' },
+      },
+    },
+    {
+      $lookup: {
+        from: 'dustbins',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'binDetails',
+      },
+    },
+    { $unwind: '$binDetails' },
+    { $match: { 'binDetails.branchAddress': { $in: branchIds } } },
+    { $match: { 'binDetails.dustbinType': 'Commingled' } },
+  ]);
+
+  let recyclingWaste = 0;
+  wasteAgg.forEach((record) => {
+    recyclingWaste += record.cumulativeWaste;
+  });
+  return recyclingWaste;
+};
 
 /**
+ * getLatestBinWeight
  * GET /api/v1/analytics/latestBinWeight
- * Retrieves the latest waste record for a specific bin for today.
+ * Retrieves the latest waste record for a specific bin (today's data).
+ * Query Params:
+ *   - binId: (required) The ObjectId of the dustbin.
  */
-export const getLatestBinWeight = asyncHandler(async (req, res) => {
+const getLatestBinWeight = asyncHandler(async (req, res) => {
   const { binId } = req.query;
   if (!binId) throw new ApiError(400, 'binId is required');
   if (!mongoose.Types.ObjectId.isValid(binId)) throw new ApiError(400, 'Invalid binId format');
@@ -198,73 +209,64 @@ export const getLatestBinWeight = asyncHandler(async (req, res) => {
 });
 
 /**
+ * getBinStatus
  * GET /api/v1/analytics/binStatus
- * Retrieves real-time bin status for a given branch.
+ * Retrieves real-time status for all bins in a branch.
+ * Query Params:
+ *   - branchId: (required) The branch ObjectId.
  */
-export const getBinStatus = asyncHandler(async (req, res) => {
+const getBinStatus = asyncHandler(async (req, res) => {
   const { branchId } = req.query;
   if (!branchId) throw new ApiError(400, 'branchId is required');
-  try {
-    const bins = await Dustbin.find({ branchAddress: branchId }).lean();
-    const binStatus = bins.map((bin) => ({
-      _id: bin._id,
-      binName: bin.dustbinType,
-      currentWeight: bin.currentWeight,
-      binCapacity: bin.binCapacity,
-      isActive: !bin.isCleaned,
-    }));
-    return res
-      .status(200)
-      .json(new ApiResponse(200, binStatus, 'Bin status data fetched successfully'));
-  } catch (error) {
-    console.error('Error in getBinStatus:', error);
-    throw new ApiError(500, 'Failed to fetch bin status data');
-  }
+  const bins = await Dustbin.find({ branchAddress: branchId }).lean();
+  const binStatus = bins.map((bin) => ({
+    _id: bin._id,
+    binName: bin.dustbinType,
+    currentWeight: bin.currentWeight,
+    binCapacity: bin.binCapacity,
+    isActive: !bin.isCleaned,
+  }));
+  return res
+    .status(200)
+    .json(new ApiResponse(200, binStatus, 'Bin status data fetched successfully'));
 });
 
-/********************* Analytics Endpoints ***************************/
-
 /**
+ * getAdminOverview
  * GET /api/v1/analytics/adminOverview
+ * Computes admin-level metrics.
+ * Query Params:
+ *   - companyId (optional)
+ *   - orgUnitId (optional)
+ *   - filter (required): "today", "thisWeek", "thisMonth", "lastMonth"
  *
- * Aggregates and returns dashboard data for the admin view. Metrics include:
- *  - totalBins: Total number of bins in the filtered branches.
- *  - totalWaste: Cumulative waste collected over the current date range.
- *  - landfillDiversionPercentage: (landfillDiversion / totalWaste) * 100.
- *  - totalWasteTrend: Percentage difference in totalWaste between current and previous period.
- *  - landfillDiversionTrend: Percentage difference in landfill diversion between current and previous period.
- *
- * Query Parameters:
- *  - companyId: (Optional) Filter branches by company.
- *  - orgUnitId: (Optional) Further filter branches by an OrgUnit.
- *  - filter: Date filter ("today", "thisWeek", "thisMonth", "lastMonth").
+ * Metrics:
+ *   - totalBins: Count of bins in filtered branches.
+ *   - totalWaste: Sum of latest reading per bin per day.
+ *   - landfillDiversionPercentage = (landfillDiversion / totalWaste) * 100.
+ *   - totalWasteTrend: Percentage change in totalWaste compared to previous period.
+ *   - landfillDiversionTrend: Percentage change in landfillDiversion compared to previous period.
  */
-export const getAdminOverview = asyncHandler(async (req, res) => {
+const getAdminOverview = asyncHandler(async (req, res) => {
   const { companyId, orgUnitId, filter } = req.query;
   const now = new Date();
-
-  // Compute current period date range.
   const { startDate, endDate } = getDateRangeFromFilter(filter, now);
-  // Compute previous period date range.
   const { previousStartDate, previousEndDate } = getPreviousDateRange(filter, now);
 
-  // Build branch filter.
   let branchFilter = { isdeleted: false };
-  if (companyId) {
-    branchFilter.associatedCompany = new mongoose.Types.ObjectId(companyId);
-  }
+  if (companyId) branchFilter.associatedCompany = new mongoose.Types.ObjectId(companyId);
   if (orgUnitId) {
-    const orgUnit = await OrgUnit.findById(orgUnitId).lean();
+    let orgUnit = await OrgUnit.findById(orgUnitId).lean();
     if (!orgUnit) {
-      throw new ApiError(404, 'OrgUnit not found');
+      const branch = await BranchAddress.findById(orgUnitId).lean();
+      if (!branch) throw new ApiError(404, 'OrgUnit or BranchAddress not found');
+      orgUnit = { _id: branch._id, type: 'Branch', branchAddress: branch._id };
     }
     switch (orgUnit.type) {
       case 'Branch':
-        if (orgUnit.branchAddress) {
+        if (orgUnit.branchAddress)
           branchFilter._id = new mongoose.Types.ObjectId(orgUnit.branchAddress);
-        } else {
-          throw new ApiError(400, 'Branch OrgUnit missing branchAddress field');
-        }
+        else throw new ApiError(400, 'Branch OrgUnit missing branchAddress field');
         break;
       case 'City':
         branchFilter.city = orgUnit.name;
@@ -281,7 +283,6 @@ export const getAdminOverview = asyncHandler(async (req, res) => {
     }
   }
 
-  // Retrieve filtered branches.
   const branches = await BranchAddress.find(branchFilter).select('_id').lean();
   const branchIds = branches.map((b) => b._id);
   if (branchIds.length === 0) {
@@ -297,20 +298,12 @@ export const getAdminOverview = asyncHandler(async (req, res) => {
       .json(new ApiResponse(200, overviewData, 'No branches found for the given filter'));
   }
 
-  // Count total bins in the filtered branches.
   const totalBins = await Dustbin.countDocuments({ branchAddress: { $in: branchIds } });
-
-  // Aggregate current period waste data.
   const { totalWaste, landfillDiversion } = await aggregateWasteData(startDate, endDate, branchIds);
-  // Calculate current diversion percentage.
   const currentDiversionPercentage =
     totalWaste > 0 ? Number(((landfillDiversion / totalWaste) * 100).toFixed(2)) : 0;
-
-  // Aggregate previous period waste data.
   const { totalWaste: prevTotalWaste, landfillDiversion: prevLandfillDiversion } =
     await aggregateWasteData(previousStartDate, previousEndDate, branchIds);
-
-  // Calculate trends (percentage difference relative to previous period).
   const totalWasteTrend =
     prevTotalWaste > 0
       ? Number((((totalWaste - prevTotalWaste) / prevTotalWaste) * 100).toFixed(2))
@@ -334,20 +327,28 @@ export const getAdminOverview = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, overviewData, 'Admin overview data fetched successfully'));
 });
+
 /**
+ * getMinimalOverview
  * GET /api/v1/analytics/minimalOverview
- * Returns minimal overview data for a branch:
- * - todayWaste, trendData (daily aggregated waste), branchContribution.
+ * Computes branch-level metrics for the employee dashboard.
+ * Query Params:
+ *   - branchId (required)
+ *
+ * Metrics:
+ *   - todayWaste: Sum of latest reading per bin for today.
+ *   - branchContribution: (todayWaste / totalCompanyWaste) * 100, where totalCompanyWaste is computed from today's data across all branches in the company.
+ *   - trendData: Daily aggregated waste data for today (for charting).
  */
-export const getMinimalOverview = asyncHandler(async (req, res) => {
-  const { branchId, filter } = req.query;
+const getMinimalOverview = asyncHandler(async (req, res) => {
+  const { branchId } = req.query;
   if (!branchId) throw new ApiError(400, 'branchId is required');
   const now = new Date();
-  const { startDate, endDate } = getDateRangeFromFilter(filter, now);
+  const todayStart = startOfDay(now);
+  const todayEnd = endOfDay(now);
 
-  // Aggregate daily trend data.
   const trendPipeline = [
-    { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+    { $match: { createdAt: { $gte: todayStart, $lte: todayEnd } } },
     {
       $lookup: {
         from: 'dustbins',
@@ -368,9 +369,8 @@ export const getMinimalOverview = asyncHandler(async (req, res) => {
   ];
   const trendData = await Waste.aggregate(trendPipeline);
 
-  // Latest reading per bin.
   const branchWasteAgg = await Waste.aggregate([
-    { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+    { $match: { createdAt: { $gte: todayStart, $lte: todayEnd } } },
     {
       $lookup: {
         from: 'dustbins',
@@ -387,7 +387,6 @@ export const getMinimalOverview = asyncHandler(async (req, res) => {
   ]);
   const todayWaste = branchWasteAgg[0]?.totalBranchWaste || 0;
 
-  // Calculate branch contribution relative to company.
   const branchRecord = await BranchAddress.findById(branchId).lean();
   if (!branchRecord) throw new ApiError(404, 'Branch not found');
   const compId = branchRecord.associatedCompany;
@@ -398,7 +397,7 @@ export const getMinimalOverview = asyncHandler(async (req, res) => {
     .lean();
   const branchIds = companyBranches.map((b) => b._id);
   const companyWasteAgg = await Waste.aggregate([
-    { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+    { $match: { createdAt: { $gte: todayStart, $lte: todayEnd } } },
     {
       $lookup: {
         from: 'dustbins',
@@ -423,18 +422,23 @@ export const getMinimalOverview = asyncHandler(async (req, res) => {
 });
 
 /**
+ * getWasteTrendChart
  * GET /api/v1/analytics/wasteTrendChart
- * Returns time-series waste data for the trend chart.
- * Accepts query parameters: branchId (optional), companyId (optional), filter (optional), days (optional).
- * If branchId is provided, filters at branch level; else aggregates for the company.
+ * Returns time-series waste data for charting.
+ * Query Params:
+ *   - branchId (optional)
+ *   - companyId (optional)
+ *   - filter (optional)
+ *
+ * If branchId is provided, aggregates at branch level; else at company level.
  */
-export const getWasteTrendChart = asyncHandler(async (req, res) => {
-  const { branchId, companyId, filter, days } = req.query;
-  if (!branchId && !companyId)
-    throw new ApiError(400, 'Either branchId or companyId must be provided');
-  const { startDate, endDate } = getDateRangeFromFilter(filter, new Date());
+const getWasteTrendChart = asyncHandler(async (req, res) => {
+  const { branchId, companyId, filter } = req.query;
   let branchIds = [];
-  if (branchId) {
+  if (!branchId && !companyId) {
+    const allBranches = await BranchAddress.find({ isdeleted: false }).select('_id').lean();
+    branchIds = allBranches.map((b) => b._id);
+  } else if (branchId) {
     if (!mongoose.Types.ObjectId.isValid(branchId))
       throw new ApiError(400, 'Invalid branchId format');
     branchIds = [new mongoose.Types.ObjectId(branchId)];
@@ -447,10 +451,14 @@ export const getWasteTrendChart = asyncHandler(async (req, res) => {
     })
       .select('_id')
       .lean();
+    if (!branches.length) throw new ApiError(404, 'No branches found for the given company');
     branchIds = branches.map((b) => b._id);
-    if (branchIds.length === 0) throw new ApiError(404, 'No branches found for the given company');
   }
-  const pipeline = [
+
+  const { startDate, endDate } = getDateRangeFromFilter(filter, new Date());
+  const isToday = filter === 'today';
+
+  const baseStages = [
     { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
     {
       $lookup: {
@@ -462,43 +470,90 @@ export const getWasteTrendChart = asyncHandler(async (req, res) => {
     },
     { $unwind: '$binData' },
     { $match: { 'binData.branchAddress': { $in: branchIds } } },
-    { $sort: { createdAt: 1 } },
-    {
-      $group: {
-        _id: {
-          bin: '$associateBin',
-          date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-        },
-        weight: { $last: '$currentWeight' },
-        binName: { $first: '$binData.dustbinType' },
-      },
-    },
-    {
-      $group: {
-        _id: '$_id.bin',
-        binName: { $first: '$binName' },
-        data: { $push: { date: '$_id.date', weight: '$weight' } },
-      },
-    },
-    { $sort: { binName: 1 } },
   ];
+
+  let pipeline;
+  if (isToday) {
+    pipeline = [
+      ...baseStages,
+      { $sort: { associateBin: 1, createdAt: -1 } },
+      {
+        $group: {
+          _id: { bin: '$associateBin', hour: { $hour: '$createdAt' } },
+          weight: { $first: '$currentWeight' },
+          binType: { $first: '$binData.dustbinType' },
+        },
+      },
+      {
+        $group: {
+          _id: { binType: '$binType', hour: '$_id.hour' },
+          totalWeight: { $sum: '$weight' },
+        },
+      },
+      { $sort: { '_id.hour': 1 } },
+      {
+        $group: {
+          _id: '$_id.binType',
+          data: { $push: { hour: '$_id.hour', weight: '$totalWeight' } },
+        },
+      },
+      { $project: { _id: 0, binName: '$_id', data: 1 } },
+      { $sort: { binName: 1 } },
+    ];
+  } else {
+    pipeline = [
+      ...baseStages,
+      { $sort: { associateBin: 1, createdAt: 1 } },
+      {
+        $group: {
+          _id: {
+            bin: '$associateBin',
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          },
+          weight: { $last: '$currentWeight' },
+          binType: { $first: '$binData.dustbinType' },
+        },
+      },
+      {
+        $group: {
+          _id: { binType: '$binType', date: '$_id.date' },
+          totalWeight: { $sum: '$weight' },
+        },
+      },
+      { $sort: { '_id.date': 1 } },
+      {
+        $group: {
+          _id: '$_id.binType',
+          data: { $push: { date: '$_id.date', weight: '$totalWeight' } },
+        },
+      },
+      { $project: { _id: 0, binName: '$_id', data: 1 } },
+      { $sort: { binName: 1 } },
+    ];
+  }
+
   try {
     const trendData = await Waste.aggregate(pipeline);
     return res
       .status(200)
       .json(new ApiResponse(200, trendData, 'Waste trend chart data retrieved successfully'));
   } catch (error) {
-    console.error('Error in getWasteTrendChart:', error);
     throw new ApiError(500, 'Failed to fetch waste trend chart data');
   }
 });
 
 /**
+ * getWasteTrendComparison
  * GET /api/v1/analytics/wasteTrendComparison
  * Compares waste generation between two consecutive periods.
- * Accepts query parameters: branchId (required), filter (optional).
+ * Query Params:
+ *   - branchId (required)
+ *   - filter (optional)
+ *
+ * Formula:
+ *   percentageChange = ((thisPeriodWaste - previousPeriodWaste) / previousPeriodWaste) * 100
  */
-export const getWasteTrendComparison = asyncHandler(async (req, res) => {
+const getWasteTrendComparison = asyncHandler(async (req, res) => {
   const { branchId, filter } = req.query;
   if (!branchId) throw new ApiError(400, 'branchId is required');
   const now = new Date();
@@ -549,12 +604,7 @@ export const getWasteTrendComparison = asyncHandler(async (req, res) => {
           latestWeight: { $first: '$currentWeight' },
         },
       },
-      {
-        $group: {
-          _id: null,
-          totalWaste: { $sum: '$latestWeight' },
-        },
-      },
+      { $group: { _id: null, totalWaste: { $sum: '$latestWeight' } } },
     ];
     const result = await Waste.aggregate(pipeline);
     return result[0]?.totalWaste || 0;
@@ -587,11 +637,13 @@ export const getWasteTrendComparison = asyncHandler(async (req, res) => {
 });
 
 /**
+ * getWasteLast7Days
  * GET /api/v1/analytics/wasteLast7Days
- * Retrieves waste data for the last 7 days using the last reading per bin per day.
- * Accepts query parameter: branchId (required).
+ * Retrieves waste data for the last 7 days (using the last reading per bin per day).
+ * Query Params:
+ *   - branchId (required)
  */
-export const getWasteLast7Days = asyncHandler(async (req, res) => {
+const getWasteLast7Days = asyncHandler(async (req, res) => {
   const { branchId } = req.query;
   if (!branchId) throw new ApiError(400, 'branchId is required');
   const today = new Date();
@@ -636,11 +688,13 @@ export const getWasteLast7Days = asyncHandler(async (req, res) => {
 });
 
 /**
+ * getActivityFeed
  * GET /api/v1/analytics/activityFeed
  * Retrieves activity feed data.
- * Accepts query parameters: branchId (optional) or companyId (optional).
+ * Query Params:
+ *   - branchId (optional) or companyId (optional)
  */
-export const getActivityFeed = asyncHandler(async (req, res) => {
+const getActivityFeed = asyncHandler(async (req, res) => {
   const { branchId, companyId } = req.query;
   if (!branchId && !companyId)
     throw new ApiError(400, 'Either branchId or companyId must be provided');
@@ -683,17 +737,18 @@ export const getActivityFeed = asyncHandler(async (req, res) => {
       .status(200)
       .json(new ApiResponse(200, activities, 'Activity feed data retrieved successfully'));
   } catch (error) {
-    console.error('Error in getActivityFeed:', error);
     throw new ApiError(500, 'Failed to fetch activity feed data');
   }
 });
 
 /**
+ * getAdminLeaderboard
  * GET /api/v1/analytics/adminLeaderboard
  * Retrieves leaderboard data.
- * Accepts query parameters: branchId (optional) or companyId (optional).
+ * Query Params:
+ *   - branchId (optional) or companyId (optional)
  */
-export const getAdminLeaderboard = asyncHandler(async (req, res) => {
+const getAdminLeaderboard = asyncHandler(async (req, res) => {
   const { branchId, companyId } = req.query;
   if (branchId) {
     const leaderboardPipeline = [
@@ -709,18 +764,8 @@ export const getAdminLeaderboard = asyncHandler(async (req, res) => {
       { $unwind: '$binData' },
       { $match: { 'binData.branchAddress': new mongoose.Types.ObjectId(branchId) } },
       { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$binData.branchAddress',
-          latestWaste: { $first: '$currentWeight' },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalWaste: { $sum: '$latestWaste' },
-        },
-      },
+      { $group: { _id: '$binData.branchAddress', latestWaste: { $first: '$currentWeight' } } },
+      { $group: { _id: null, totalWaste: { $sum: '$latestWaste' } } },
     ];
     const leaderboardData = await Waste.aggregate(leaderboardPipeline);
     return res
@@ -750,18 +795,8 @@ export const getAdminLeaderboard = asyncHandler(async (req, res) => {
       { $unwind: '$binData' },
       { $match: { 'binData.branchAddress': { $in: branchIds } } },
       { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: '$binData.branchAddress',
-          latestWaste: { $first: '$currentWeight' },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalWaste: { $sum: '$latestWaste' },
-        },
-      },
+      { $group: { _id: '$binData.branchAddress', latestWaste: { $first: '$currentWeight' } } },
+      { $group: { _id: null, totalWaste: { $sum: '$latestWaste' } } },
     ];
     const leaderboardData = await Waste.aggregate(companyLeaderboardPipeline);
     return res
@@ -773,3 +808,307 @@ export const getAdminLeaderboard = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Either branchId or companyId must be provided');
   }
 });
+
+/**
+ * getRecyclingOverview
+ * NEW ENDPOINT
+ * GET /api/v1/analytics/recyclingOverview
+ *
+ * Computes the recycling rate and its trend over a given date filter.
+ * Query Params:
+ *   - companyId (optional): If provided, filters to that company; if not, aggregates for all companies.
+ *   - orgUnitId (optional): If provided, further filters by the OrgUnit.
+ *   - filter (required): "today", "thisWeek", "thisMonth", "lastMonth"
+ *
+ * Formulas:
+ *   For the current period:
+ *     - recyclingWaste = Sum of the latest reading per recycling bin (dustbinType === "Recycling") for each day.
+ *     - totalWaste = Sum of the latest reading per bin (all bins) for each day.
+ *     - currentRecyclingRate = (recyclingWaste / totalWaste) * 100
+ *
+ *   For the previous period (using the same filter):
+ *     - prevRecyclingWaste computed similarly.
+ *     - recyclingTrend = ((recyclingWaste - prevRecyclingWaste) / prevRecyclingWaste) * 100  (if prevRecyclingWaste > 0, else 0)
+ *
+ * Returns an object: { totalWaste, recyclingRate, recyclingTrend }
+ */
+const getRecyclingOverview = asyncHandler(async (req, res) => {
+  const { companyId, orgUnitId, filter } = req.query;
+  const now = new Date();
+  const { startDate, endDate } = getDateRangeFromFilter(filter, now);
+  const { previousStartDate, previousEndDate } = getPreviousDateRange(filter, now);
+
+  let branchFilter = { isdeleted: false };
+  if (companyId) {
+    branchFilter.associatedCompany = new mongoose.Types.ObjectId(companyId);
+  }
+  if (orgUnitId) {
+    let orgUnit = await OrgUnit.findById(orgUnitId).lean();
+    if (!orgUnit) {
+      const branch = await BranchAddress.findById(orgUnitId).lean();
+      if (!branch) throw new ApiError(404, 'OrgUnit or BranchAddress not found');
+      orgUnit = { _id: branch._id, type: 'Branch', branchAddress: branch._id };
+    }
+    switch (orgUnit.type) {
+      case 'Branch':
+        if (orgUnit.branchAddress) {
+          branchFilter._id = new mongoose.Types.ObjectId(orgUnit.branchAddress);
+        } else {
+          throw new ApiError(400, 'Branch OrgUnit missing branchAddress field');
+        }
+        break;
+      case 'City':
+        branchFilter.city = orgUnit.name;
+        break;
+      case 'Country':
+        branchFilter.country = orgUnit.name;
+        break;
+      case 'Region':
+      case 'State':
+        branchFilter.subdivision = orgUnit.name;
+        break;
+      default:
+        break;
+    }
+  }
+
+  const branches = await BranchAddress.find(branchFilter).select('_id').lean();
+  const branchIds = branches.map((b) => b._id);
+  if (branchIds.length === 0) {
+    const overviewData = { totalWaste: 0, recyclingRate: 0, recyclingTrend: 0 };
+    return res
+      .status(200)
+      .json(new ApiResponse(200, overviewData, 'No branches found for the given filter'));
+  }
+
+  // Aggregate total waste for current period.
+  const { totalWaste } = await aggregateWasteData(startDate, endDate, branchIds);
+  // Aggregate recycling waste for current period.
+  const recyclingWaste = await aggregateRecyclingWasteData(startDate, endDate, branchIds);
+  const currentRecyclingRate =
+    totalWaste > 0 ? Number(((recyclingWaste / totalWaste) * 100).toFixed(2)) : 0;
+
+  // Aggregate for previous period.
+  const { totalWaste: prevTotalWaste } = await aggregateWasteData(
+    previousStartDate,
+    previousEndDate,
+    branchIds,
+  );
+  const prevRecyclingWaste = await aggregateRecyclingWasteData(
+    previousStartDate,
+    previousEndDate,
+    branchIds,
+  );
+  const recyclingTrend =
+    prevRecyclingWaste > 0
+      ? Number((((recyclingWaste - prevRecyclingWaste) / prevRecyclingWaste) * 100).toFixed(2))
+      : 0;
+
+  const overviewData = {
+    totalWaste,
+    recyclingRate: currentRecyclingRate,
+    recyclingTrend,
+  };
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, overviewData, 'Recycling overview data fetched successfully'));
+});
+/**
+ * getDateRangeForLeaderboard:
+ * Determines the date range for the leaderboard aggregation.
+ * If today's date is ≤ 7, it uses last month's period;
+ * otherwise, it uses the current month's period.
+ *
+ * @returns {Object} { startDate, endDate, periodLabel }
+ */
+const getDateRangeForLeaderboard = (now = new Date()) => {
+  let periodLabel = 'This Month';
+  let startDate, endDate;
+  if (now.getDate() <= 7) {
+    // Use last month's period to ensure sufficient data.
+    const lastMonth = subMonths(now, 1);
+    startDate = startOfMonth(lastMonth);
+    endDate = endOfMonth(lastMonth);
+    periodLabel = 'Last Month';
+  } else {
+    startDate = startOfMonth(now);
+    endDate = endOfMonth(now);
+  }
+  return { startDate, endDate, periodLabel };
+};
+
+/**
+ * getLeaderboardData
+ *
+ * NEW ENDPOINT – GET /api/v1/analytics/leaderboard
+ *
+ * Depending on the query parameters:
+ * - When no company filter is provided, data is grouped by company.
+ * - When a company filter is provided, data is grouped by branch (OrgUnit).
+ *
+ * The endpoint uses waste data from the given period (current month or last month if within the first week),
+ * taking the latest reading per bin per day. For each group, it calculates:
+ *   - totalWaste: Sum of latest readings per bin.
+ *   - landfillDiversion: Sum for bins where dustbinType is not "General Waste".
+ *   - diversionPercentage: (landfillDiversion / totalWaste) * 100.
+ *
+ * The results are sorted in descending order of diversionPercentage.
+ *
+ * Query Parameters:
+ *   - companyId (optional): If provided, leaderboard is computed per branch within that company.
+ *
+ * Returns:
+ *   An object with:
+ *     - leaderboard: Array of aggregated records (each with group identifier, totalWaste, diversionPercentage, etc.)
+ *     - period: A label indicating which period was used (e.g. "This Month" or "Last Month")
+ */
+export const getLeaderboardData = asyncHandler(async (req, res) => {
+  const { companyId } = req.query;
+  const now = new Date();
+  const { startDate, endDate, periodLabel } = getDateRangeForLeaderboard(now);
+
+  // Build branch filter based on query parameters.
+  let branchFilter = { isdeleted: false };
+  if (companyId) {
+    // When company filter is applied, we limit branches to that company.
+    branchFilter.associatedCompany = new mongoose.Types.ObjectId(companyId);
+  }
+  // Get all branches matching the filter.
+  const branches = await BranchAddress.find(branchFilter)
+    .select('_id officeName associatedCompany')
+    .lean();
+  const branchIds = branches.map((b) => b._id);
+  if (branchIds.length === 0) {
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { leaderboard: [], period: periodLabel },
+          'No branches found for the given filter',
+        ),
+      );
+  }
+
+  // Aggregation pipeline:
+  const pipeline = [
+    // Match waste records within the time range.
+    { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+    // Create a 'day' field in YYYY-MM-DD format.
+    { $addFields: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } } },
+    // Sort by bin and createdAt descending to get latest reading per day.
+    { $sort: { associateBin: 1, createdAt: -1 } },
+    // Group by bin and day: select the first (latest) reading.
+    {
+      $group: {
+        _id: { bin: '$associateBin', day: '$day' },
+        latestWaste: { $first: '$currentWeight' },
+      },
+    },
+    // Sum waste per bin for the period.
+    {
+      $group: {
+        _id: '$_id.bin',
+        cumulativeWaste: { $sum: '$latestWaste' },
+      },
+    },
+    // Look up bin details.
+    {
+      $lookup: {
+        from: 'dustbins',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'binDetails',
+      },
+    },
+    { $unwind: '$binDetails' },
+    // Only consider bins that belong to the matched branches.
+    { $match: { 'binDetails.branchAddress': { $in: branchIds } } },
+    // Lookup branch details from BranchAddress collection.
+    {
+      $lookup: {
+        from: 'branchaddresses',
+        localField: 'binDetails.branchAddress',
+        foreignField: '_id',
+        as: 'branchDetails',
+      },
+    },
+    { $unwind: '$branchDetails' },
+  ];
+
+  // Grouping stage: If company filter is applied, group by branch; otherwise, group by company.
+  if (companyId) {
+    pipeline.push({
+      $group: {
+        _id: '$branchDetails._id',
+        branchName: { $first: '$branchDetails.officeName' },
+        totalWaste: { $sum: '$cumulativeWaste' },
+        landfillDiversion: {
+          $sum: {
+            $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0],
+          },
+        },
+      },
+    });
+  } else {
+    pipeline.push({
+      $group: {
+        _id: '$branchDetails.associatedCompany',
+        companyName: { $first: '$branchDetails.companyName' },
+        totalWaste: { $sum: '$cumulativeWaste' },
+        landfillDiversion: {
+          $sum: {
+            $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0],
+          },
+        },
+      },
+    });
+  }
+
+  // Project the diversion percentage.
+  pipeline.push({
+    $project: {
+      totalWaste: 1,
+      landfillDiversion: 1,
+      diversionPercentage: {
+        $cond: [
+          { $gt: ['$totalWaste', 0] },
+          { $multiply: [{ $divide: ['$landfillDiversion', '$totalWaste'] }, 100] },
+          0,
+        ],
+      },
+    },
+  });
+
+  // Sort the results in descending order by diversionPercentage.
+  pipeline.push({ $sort: { diversionPercentage: -1 } });
+
+  // Execute aggregation.
+  const leaderboard = await Waste.aggregate(pipeline);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        { leaderboard, period: periodLabel },
+        'Leaderboard data fetched successfully',
+      ),
+    );
+});
+
+// Export all functions at the end for easier tracking.
+export {
+  getLatestBinWeight,
+  getBinStatus,
+  getAdminOverview,
+  getMinimalOverview,
+  getWasteTrendChart,
+  getWasteTrendComparison,
+  getWasteLast7Days,
+  getActivityFeed,
+  getAdminLeaderboard,
+  getRecyclingOverview,
+  getLeaderboardData,
+};

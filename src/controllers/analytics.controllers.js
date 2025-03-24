@@ -742,74 +742,6 @@ const getActivityFeed = asyncHandler(async (req, res) => {
 });
 
 /**
- * getAdminLeaderboard
- * GET /api/v1/analytics/adminLeaderboard
- * Retrieves leaderboard data.
- * Query Params:
- *   - branchId (optional) or companyId (optional)
- */
-const getAdminLeaderboard = asyncHandler(async (req, res) => {
-  const { branchId, companyId } = req.query;
-  if (branchId) {
-    const leaderboardPipeline = [
-      { $match: { createdAt: { $gte: startOfDay(new Date()), $lte: endOfDay(new Date()) } } },
-      {
-        $lookup: {
-          from: 'dustbins',
-          localField: 'associateBin',
-          foreignField: '_id',
-          as: 'binData',
-        },
-      },
-      { $unwind: '$binData' },
-      { $match: { 'binData.branchAddress': new mongoose.Types.ObjectId(branchId) } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$binData.branchAddress', latestWaste: { $first: '$currentWeight' } } },
-      { $group: { _id: null, totalWaste: { $sum: '$latestWaste' } } },
-    ];
-    const leaderboardData = await Waste.aggregate(leaderboardPipeline);
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(200, leaderboardData, 'Office leaderboard data retrieved successfully'),
-      );
-  } else if (companyId) {
-    let filter = {};
-    if (companyId !== 'all') {
-      if (!mongoose.Types.ObjectId.isValid(companyId))
-        throw new ApiError(400, 'Invalid companyId format');
-      filter.associatedCompany = new mongoose.Types.ObjectId(companyId);
-    }
-    const branches = await BranchAddress.find(filter).select('_id').lean();
-    const branchIds = branches.map((b) => b._id);
-    const companyLeaderboardPipeline = [
-      { $match: { createdAt: { $gte: startOfDay(new Date()), $lte: endOfDay(new Date()) } } },
-      {
-        $lookup: {
-          from: 'dustbins',
-          localField: 'associateBin',
-          foreignField: '_id',
-          as: 'binData',
-        },
-      },
-      { $unwind: '$binData' },
-      { $match: { 'binData.branchAddress': { $in: branchIds } } },
-      { $sort: { createdAt: -1 } },
-      { $group: { _id: '$binData.branchAddress', latestWaste: { $first: '$currentWeight' } } },
-      { $group: { _id: null, totalWaste: { $sum: '$latestWaste' } } },
-    ];
-    const leaderboardData = await Waste.aggregate(companyLeaderboardPipeline);
-    return res
-      .status(200)
-      .json(
-        new ApiResponse(200, leaderboardData, 'Company leaderboard data retrieved successfully'),
-      );
-  } else {
-    throw new ApiError(400, 'Either branchId or companyId must be provided');
-  }
-});
-
-/**
  * getRecyclingOverview
  * NEW ENDPOINT
  * GET /api/v1/analytics/recyclingOverview
@@ -963,18 +895,178 @@ const getDateRangeForLeaderboard = (now = new Date()) => {
  *     - leaderboard: Array of aggregated records (each with group identifier, totalWaste, diversionPercentage, etc.)
  *     - period: A label indicating which period was used (e.g. "This Month" or "Last Month")
  */
-export const getLeaderboardData = asyncHandler(async (req, res) => {
+// const getLeaderboardData = asyncHandler(async (req, res) => {
+//   const { companyId } = req.query;
+//   const now = new Date();
+//   const { startDate, endDate, periodLabel } = getDateRangeForLeaderboard(now);
+
+//   // Build branch filter based on query parameters.
+//   let branchFilter = { isdeleted: false };
+//   if (companyId) {
+//     // When company filter is applied, we limit branches to that company.
+//     branchFilter.associatedCompany = new mongoose.Types.ObjectId(companyId);
+//   }
+//   // Get all branches matching the filter.
+//   const branches = await BranchAddress.find(branchFilter)
+//     .select('_id officeName associatedCompany')
+//     .lean();
+//   const branchIds = branches.map((b) => b._id);
+//   if (branchIds.length === 0) {
+//     return res
+//       .status(200)
+//       .json(
+//         new ApiResponse(
+//           200,
+//           { leaderboard: [], period: periodLabel },
+//           'No branches found for the given filter',
+//         ),
+//       );
+//   }
+
+//   // Aggregation pipeline:
+//   const pipeline = [
+//     // Match waste records within the time range.
+//     { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+//     // Create a 'day' field in YYYY-MM-DD format.
+//     { $addFields: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } } },
+//     // Sort by bin and createdAt descending to get latest reading per day.
+//     { $sort: { associateBin: 1, createdAt: -1 } },
+//     // Group by bin and day: select the first (latest) reading.
+//     {
+//       $group: {
+//         _id: { bin: '$associateBin', day: '$day' },
+//         latestWaste: { $first: '$currentWeight' },
+//       },
+//     },
+//     // Sum waste per bin for the period.
+//     {
+//       $group: {
+//         _id: '$_id.bin',
+//         cumulativeWaste: { $sum: '$latestWaste' },
+//       },
+//     },
+//     // Look up bin details.
+//     {
+//       $lookup: {
+//         from: 'dustbins',
+//         localField: '_id',
+//         foreignField: '_id',
+//         as: 'binDetails',
+//       },
+//     },
+//     { $unwind: '$binDetails' },
+//     // Only consider bins that belong to the matched branches.
+//     { $match: { 'binDetails.branchAddress': { $in: branchIds } } },
+//     // Lookup branch details from BranchAddress collection.
+//     {
+//       $lookup: {
+//         from: 'branchaddresses',
+//         localField: 'binDetails.branchAddress',
+//         foreignField: '_id',
+//         as: 'branchDetails',
+//       },
+//     },
+//     { $unwind: '$branchDetails' },
+//   ];
+
+//   // Grouping stage: If company filter is applied, group by branch; otherwise, group by company.
+//   if (companyId) {
+//     pipeline.push({
+//       $group: {
+//         _id: '$branchDetails._id',
+//         branchName: { $first: '$branchDetails.officeName' },
+//         totalWaste: { $sum: '$cumulativeWaste' },
+//         landfillDiversion: {
+//           $sum: {
+//             $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0],
+//           },
+//         },
+//       },
+//     });
+//   } else {
+//     pipeline.push({
+//       $group: {
+//         _id: '$branchDetails.associatedCompany',
+//         companyName: { $first: '$branchDetails.companyName' },
+//         totalWaste: { $sum: '$cumulativeWaste' },
+//         landfillDiversion: {
+//           $sum: {
+//             $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0],
+//           },
+//         },
+//       },
+//     });
+//   }
+
+//   // Project the diversion percentage.
+//   pipeline.push({
+//     $project: {
+//       totalWaste: 1,
+//       landfillDiversion: 1,
+//       diversionPercentage: {
+//         $cond: [
+//           { $gt: ['$totalWaste', 0] },
+//           { $multiply: [{ $divide: ['$landfillDiversion', '$totalWaste'] }, 100] },
+//           0,
+//         ],
+//       },
+//     },
+//   });
+
+//   // Sort the results in descending order by diversionPercentage.
+//   pipeline.push({ $sort: { diversionPercentage: -1 } });
+
+//   // Execute aggregation.
+//   const leaderboard = await Waste.aggregate(pipeline);
+
+//   return res
+//     .status(200)
+//     .json(
+//       new ApiResponse(
+//         200,
+//         { leaderboard, period: periodLabel },
+//         'Leaderboard data fetched successfully',
+//       ),
+//     );
+// });
+/**
+ * getLeaderboardData
+ *
+ * NEW ENDPOINT – GET /api/v1/analytics/leaderboard
+ *
+ * Aggregates waste data based on the selected period. The aggregation takes the latest waste
+ * reading per bin per day over the period, sums the readings per bin, then:
+ *
+ * - When a company filter is applied, groups by branch (using branchDetails.officeName).
+ * - When no company filter is provided, groups by the associated company. A lookup to the Company
+ *   collection retrieves the company name.
+ *
+ * For each group, the following is calculated:
+ *   - totalWaste: Sum of latest readings per bin.
+ *   - landfillDiversion: Sum of readings only for bins whose dustbinType is not "General Waste".
+ *   - diversionPercentage: (landfillDiversion / totalWaste) * 100.
+ *
+ * The results are sorted in descending order by diversionPercentage.
+ *
+ * Query Parameters:
+ *   - companyId (optional): If provided, the leaderboard is computed at branch level for that company.
+ *
+ * Returns:
+ *   An object with:
+ *     - leaderboard: Array of aggregated records (each with a name, totalWaste, diversionPercentage, etc.)
+ *     - period: A label indicating which period was used (e.g. "This Month" or "Last Month")
+ */
+const getLeaderboardData = asyncHandler(async (req, res) => {
   const { companyId } = req.query;
   const now = new Date();
   const { startDate, endDate, periodLabel } = getDateRangeForLeaderboard(now);
 
-  // Build branch filter based on query parameters.
+  // Build branch filter.
   let branchFilter = { isdeleted: false };
   if (companyId) {
-    // When company filter is applied, we limit branches to that company.
     branchFilter.associatedCompany = new mongoose.Types.ObjectId(companyId);
   }
-  // Get all branches matching the filter.
+  // Retrieve branches matching the filter.
   const branches = await BranchAddress.find(branchFilter)
     .select('_id officeName associatedCompany')
     .lean();
@@ -991,29 +1083,29 @@ export const getLeaderboardData = asyncHandler(async (req, res) => {
       );
   }
 
-  // Aggregation pipeline:
+  // Aggregation pipeline.
   const pipeline = [
-    // Match waste records within the time range.
+    // Match waste records in the selected period.
     { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
-    // Create a 'day' field in YYYY-MM-DD format.
+    // Create a 'day' field.
     { $addFields: { day: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } } } },
-    // Sort by bin and createdAt descending to get latest reading per day.
+    // Sort descending to pick the latest record per bin per day.
     { $sort: { associateBin: 1, createdAt: -1 } },
-    // Group by bin and day: select the first (latest) reading.
+    // Group by bin and day.
     {
       $group: {
         _id: { bin: '$associateBin', day: '$day' },
         latestWaste: { $first: '$currentWeight' },
       },
     },
-    // Sum waste per bin for the period.
+    // Sum readings per bin.
     {
       $group: {
         _id: '$_id.bin',
         cumulativeWaste: { $sum: '$latestWaste' },
       },
     },
-    // Look up bin details.
+    // Lookup bin details.
     {
       $lookup: {
         from: 'dustbins',
@@ -1023,9 +1115,9 @@ export const getLeaderboardData = asyncHandler(async (req, res) => {
       },
     },
     { $unwind: '$binDetails' },
-    // Only consider bins that belong to the matched branches.
+    // Only include bins from the matching branches.
     { $match: { 'binDetails.branchAddress': { $in: branchIds } } },
-    // Lookup branch details from BranchAddress collection.
+    // Lookup branch details.
     {
       $lookup: {
         from: 'branchaddresses',
@@ -1037,8 +1129,8 @@ export const getLeaderboardData = asyncHandler(async (req, res) => {
     { $unwind: '$branchDetails' },
   ];
 
-  // Grouping stage: If company filter is applied, group by branch; otherwise, group by company.
   if (companyId) {
+    // Group by branch when a company filter is applied.
     pipeline.push({
       $group: {
         _id: '$branchDetails._id',
@@ -1051,11 +1143,25 @@ export const getLeaderboardData = asyncHandler(async (req, res) => {
         },
       },
     });
+    pipeline.push({
+      $project: {
+        totalWaste: 1,
+        landfillDiversion: 1,
+        diversionPercentage: {
+          $cond: [
+            { $gt: ['$totalWaste', 0] },
+            { $multiply: [{ $divide: ['$landfillDiversion', '$totalWaste'] }, 100] },
+            0,
+          ],
+        },
+        name: '$branchName',
+      },
+    });
   } else {
+    // Group by company when no company filter is provided.
     pipeline.push({
       $group: {
         _id: '$branchDetails.associatedCompany',
-        companyName: { $first: '$branchDetails.companyName' },
         totalWaste: { $sum: '$cumulativeWaste' },
         landfillDiversion: {
           $sum: {
@@ -1064,29 +1170,36 @@ export const getLeaderboardData = asyncHandler(async (req, res) => {
         },
       },
     });
+    // Lookup company details to get the company name.
+    pipeline.push({
+      $lookup: {
+        from: 'companies',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'companyDetails',
+      },
+    });
+    pipeline.push({ $unwind: '$companyDetails' });
+    pipeline.push({
+      $project: {
+        totalWaste: 1,
+        landfillDiversion: 1,
+        diversionPercentage: {
+          $cond: [
+            { $gt: ['$totalWaste', 0] },
+            { $multiply: [{ $divide: ['$landfillDiversion', '$totalWaste'] }, 100] },
+            0,
+          ],
+        },
+        name: '$companyDetails.CompanyName',
+      },
+    });
   }
 
-  // Project the diversion percentage.
-  pipeline.push({
-    $project: {
-      totalWaste: 1,
-      landfillDiversion: 1,
-      diversionPercentage: {
-        $cond: [
-          { $gt: ['$totalWaste', 0] },
-          { $multiply: [{ $divide: ['$landfillDiversion', '$totalWaste'] }, 100] },
-          0,
-        ],
-      },
-    },
-  });
-
-  // Sort the results in descending order by diversionPercentage.
+  // Sort the results in descending order of diversionPercentage.
   pipeline.push({ $sort: { diversionPercentage: -1 } });
 
-  // Execute aggregation.
   const leaderboard = await Waste.aggregate(pipeline);
-
   return res
     .status(200)
     .json(
@@ -1097,7 +1210,6 @@ export const getLeaderboardData = asyncHandler(async (req, res) => {
       ),
     );
 });
-
 // Export all functions at the end for easier tracking.
 export {
   getLatestBinWeight,
@@ -1108,7 +1220,6 @@ export {
   getWasteTrendComparison,
   getWasteLast7Days,
   getActivityFeed,
-  getAdminLeaderboard,
   getRecyclingOverview,
   getLeaderboardData,
 };

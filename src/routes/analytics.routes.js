@@ -9,7 +9,6 @@ import {
   getAdminOverview,
   getWasteTrendChart,
   getActivityFeed,
-  getAdminLeaderboard,
   getRecyclingOverview,
   getLeaderboardData,
 } from '../controllers/analytics.controllers.js';
@@ -31,7 +30,7 @@ router.get('/wasteTrendChart', verifyJWT, getWasteTrendChart);
 
 // Activity Feed and Leaderboard Endpoints
 router.get('/activityFeed', verifyJWT, getActivityFeed);
-router.get('/adminLeaderboard', verifyJWT, getAdminLeaderboard);
+
 router.get('/leaderboard', getLeaderboardData);
 
 // Offices Endpoint integrated here for admin dashboard use

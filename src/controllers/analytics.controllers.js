@@ -425,123 +425,249 @@ const getMinimalOverview = asyncHandler(async (req, res) => {
  * getWasteTrendChart
  * GET /api/v1/analytics/wasteTrendChart
  * Returns time-series waste data for charting.
- * Query Params:
- *   - branchId (optional)
- *   - companyId (optional)
- *   - filter (optional)
  *
- * If branchId is provided, aggregates at branch level; else at company level.
+ * Query Parameters:
+ *   - branchId (optional): The ObjectId of a specific branch.
+ *   - companyId (optional): If provided and not "All Organizations", aggregates data across all branches for that company.
+ *   - orgUnitId (optional): If provided, aggregates data across all branches associated with that organization unit.
+ *   - filter (optional): One of "today", "thisWeek", "thisMonth", or "lastMonth". Defaults to "today".
+ *
+ * Expected Behavior:
+ *   - When filter is "today": aggregates hourly data grouped by bin types.
+ *   - For other filters: aggregates daily data from the start of the period (e.g. start of week/month) until today.
+ *     * If the aggregation returns less than 2 data points (e.g. if today is Monday for "thisWeek"),
+ *       an appropriate message is returned indicating insufficient data for a line chart.
+ *   - When a company filter is applied (and not set to "All Organizations"), it groups all the branch data by bin types.
+ *   - When no company filter is provided or it is set to "All Organizations", data is aggregated for all organizations.
+ *
+ * Notes:
+ *   - Designed to be efficient for large datasets using optimized aggregation pipelines and compound indexes.
+ *   - Key steps are logged to the console to facilitate debugging.
+ *   - Edge cases are handled gracefully with clear messages.
  */
+
 const getWasteTrendChart = asyncHandler(async (req, res) => {
-  const { branchId, companyId, filter } = req.query;
-  let branchIds = [];
-  if (!branchId && !companyId) {
-    const allBranches = await BranchAddress.find({ isdeleted: false }).select('_id').lean();
-    branchIds = allBranches.map((b) => b._id);
-  } else if (branchId) {
-    if (!mongoose.Types.ObjectId.isValid(branchId))
-      throw new ApiError(400, 'Invalid branchId format');
-    branchIds = [new mongoose.Types.ObjectId(branchId)];
-  } else if (companyId) {
-    if (!mongoose.Types.ObjectId.isValid(companyId))
-      throw new ApiError(400, 'Invalid companyId format');
-    const branches = await BranchAddress.find({
-      associatedCompany: new mongoose.Types.ObjectId(companyId),
-      isdeleted: false,
-    })
-      .select('_id')
-      .lean();
-    if (!branches.length) throw new ApiError(404, 'No branches found for the given company');
-    branchIds = branches.map((b) => b._id);
-  }
-
-  const { startDate, endDate } = getDateRangeFromFilter(filter, new Date());
-  const isToday = filter === 'today';
-
-  const baseStages = [
-    { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
-    {
-      $lookup: {
-        from: 'dustbins',
-        localField: 'associateBin',
-        foreignField: '_id',
-        as: 'binData',
-      },
-    },
-    { $unwind: '$binData' },
-    { $match: { 'binData.branchAddress': { $in: branchIds } } },
-  ];
-
-  let pipeline;
-  if (isToday) {
-    pipeline = [
-      ...baseStages,
-      { $sort: { associateBin: 1, createdAt: -1 } },
-      {
-        $group: {
-          _id: { bin: '$associateBin', hour: { $hour: '$createdAt' } },
-          weight: { $first: '$currentWeight' },
-          binType: { $first: '$binData.dustbinType' },
-        },
-      },
-      {
-        $group: {
-          _id: { binType: '$binType', hour: '$_id.hour' },
-          totalWeight: { $sum: '$weight' },
-        },
-      },
-      { $sort: { '_id.hour': 1 } },
-      {
-        $group: {
-          _id: '$_id.binType',
-          data: { $push: { hour: '$_id.hour', weight: '$totalWeight' } },
-        },
-      },
-      { $project: { _id: 0, binName: '$_id', data: 1 } },
-      { $sort: { binName: 1 } },
-    ];
-  } else {
-    pipeline = [
-      ...baseStages,
-      { $sort: { associateBin: 1, createdAt: 1 } },
-      {
-        $group: {
-          _id: {
-            bin: '$associateBin',
-            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-          },
-          weight: { $last: '$currentWeight' },
-          binType: { $first: '$binData.dustbinType' },
-        },
-      },
-      {
-        $group: {
-          _id: { binType: '$binType', date: '$_id.date' },
-          totalWeight: { $sum: '$weight' },
-        },
-      },
-      { $sort: { '_id.date': 1 } },
-      {
-        $group: {
-          _id: '$_id.binType',
-          data: { $push: { date: '$_id.date', weight: '$totalWeight' } },
-        },
-      },
-      { $project: { _id: 0, binName: '$_id', data: 1 } },
-      { $sort: { binName: 1 } },
-    ];
-  }
-
   try {
-    const trendData = await Waste.aggregate(pipeline);
+    // Set default filter to "today" if not provided.
+    let { branchId, companyId, orgUnitId, filter } = req.query;
+    if (!filter) filter = 'today';
+    // Treat companyId "All Organizations" as if no company filter is applied.
+    if (companyId && companyId === 'All Organizations') {
+      companyId = undefined;
+    }
+    console.log('getWasteTrendChart called with parameters:', {
+      branchId,
+      companyId,
+      orgUnitId,
+      filter,
+    });
+
+    // Determine branch IDs based on provided filters.
+    let branchIds = [];
+    if (!branchId && !companyId && !orgUnitId) {
+      // No specific filter provided; aggregate across all non-deleted branches.
+      const allBranches = await BranchAddress.find({ isdeleted: false }).select('_id').lean();
+      branchIds = allBranches.map((b) => b._id);
+    } else if (branchId) {
+      if (!mongoose.Types.ObjectId.isValid(branchId))
+        throw new ApiError(400, 'Invalid branchId format');
+      branchIds = [new mongoose.Types.ObjectId(branchId)];
+    } else if (companyId) {
+      if (!mongoose.Types.ObjectId.isValid(companyId))
+        throw new ApiError(400, 'Invalid companyId format');
+      const branches = await BranchAddress.find({
+        associatedCompany: new mongoose.Types.ObjectId(companyId),
+        isdeleted: false,
+      })
+        .select('_id')
+        .lean();
+      if (!branches.length) throw new ApiError(404, 'No branches found for the given company');
+      branchIds = branches.map((b) => b._id);
+    } else if (orgUnitId) {
+      if (!mongoose.Types.ObjectId.isValid(orgUnitId))
+        throw new ApiError(400, 'Invalid orgUnitId format');
+      let orgUnit = await OrgUnit.findById(orgUnitId).lean();
+      if (!orgUnit) {
+        const branch = await BranchAddress.findById(orgUnitId).lean();
+        if (!branch) throw new ApiError(404, 'OrgUnit or BranchAddress not found');
+        orgUnit = { _id: branch._id, type: 'Branch', branchAddress: branch._id };
+      }
+      switch (orgUnit.type) {
+        case 'Branch':
+          if (orgUnit.branchAddress) {
+            branchIds = [new mongoose.Types.ObjectId(orgUnit.branchAddress)];
+          } else {
+            throw new ApiError(400, 'Branch OrgUnit missing branchAddress field');
+          }
+          break;
+        case 'City':
+          branchIds = (
+            await BranchAddress.find({ city: orgUnit.name, isdeleted: false }).select('_id').lean()
+          ).map((b) => b._id);
+          break;
+        case 'Country':
+          branchIds = (
+            await BranchAddress.find({ country: orgUnit.name, isdeleted: false })
+              .select('_id')
+              .lean()
+          ).map((b) => b._id);
+          break;
+        case 'Region':
+        case 'State':
+          branchIds = (
+            await BranchAddress.find({ subdivision: orgUnit.name, isdeleted: false })
+              .select('_id')
+              .lean()
+          ).map((b) => b._id);
+          break;
+        default:
+          // Fallback: get all branches.
+          const allBranchesOrg = await BranchAddress.find({ isdeleted: false })
+            .select('_id')
+            .lean();
+          branchIds = allBranchesOrg.map((b) => b._id);
+      }
+    }
+    if (branchIds.length === 0) throw new ApiError(404, 'No branches found for the given filter');
+
+    // Determine the date range based on the filter.
+    const now = new Date();
+    let startDate, endDate;
+    if (filter === 'today') {
+      startDate = startOfDay(now);
+      endDate = endOfDay(now);
+    } else if (filter === 'thisWeek') {
+      // Actual week: from start of week (Monday) until now.
+      startDate = startOfWeek(now, { weekStartsOn: 1 });
+      endDate = now;
+    } else if (filter === 'thisMonth') {
+      startDate = startOfMonth(now);
+      endDate = now;
+    } else if (filter === 'lastMonth') {
+      const lastMonthDate = subMonths(now, 1);
+      startDate = startOfMonth(lastMonthDate);
+      endDate = endOfMonth(lastMonthDate);
+    } else {
+      // Default to today if filter is unrecognized.
+      startDate = startOfDay(now);
+      endDate = endOfDay(now);
+    }
+    console.log('Date range for aggregation:', { startDate, endDate });
+
+    // Base stages for the aggregation pipeline.
+    const baseStages = [
+      { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
+        },
+      },
+      { $unwind: '$binData' },
+      { $match: { 'binData.branchAddress': { $in: branchIds } } },
+    ];
+
+    let pipeline;
+    if (filter === 'today') {
+      // For "today", aggregate hourly data.
+      pipeline = [
+        ...baseStages,
+        { $sort: { associateBin: 1, createdAt: -1 } },
+        {
+          $group: {
+            _id: { bin: '$associateBin', hour: { $hour: '$createdAt' } },
+            weight: { $first: '$currentWeight' },
+            binType: { $first: '$binData.dustbinType' },
+          },
+        },
+        {
+          $group: {
+            _id: { binType: '$binType', hour: '$_id.hour' },
+            totalWeight: { $sum: '$weight' },
+          },
+        },
+        { $sort: { '_id.hour': 1 } },
+        {
+          $group: {
+            _id: '$_id.binType',
+            data: { $push: { hour: '$_id.hour', weight: '$totalWeight' } },
+          },
+        },
+        { $project: { _id: 0, binName: '$_id', data: 1 } },
+        { $sort: { binName: 1 } },
+      ];
+    } else {
+      // For non-"today" filters, aggregate daily data from the start of the period until today.
+      pipeline = [
+        ...baseStages,
+        { $sort: { associateBin: 1, createdAt: 1 } },
+        {
+          $group: {
+            _id: {
+              bin: '$associateBin',
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            },
+            weight: { $last: '$currentWeight' },
+            binType: { $first: '$binData.dustbinType' },
+          },
+        },
+        {
+          $group: {
+            _id: { binType: '$binType', date: '$_id.date' },
+            totalWeight: { $sum: '$weight' },
+          },
+        },
+        { $sort: { '_id.date': 1 } },
+        {
+          $group: {
+            _id: '$_id.binType',
+            data: { $push: { date: '$_id.date', weight: '$totalWeight' } },
+          },
+        },
+        { $project: { _id: 0, binName: '$_id', data: 1 } },
+        { $sort: { binName: 1 } },
+      ];
+    }
+    console.log('Aggregation pipeline:', JSON.stringify(pipeline, null, 2));
+
+    // Execute the aggregation pipeline with allowDiskUse for large datasets.
+    const trendData = await Waste.aggregate(pipeline).allowDiskUse(true);
+    console.log('Aggregated trend data:', trendData);
+
+    // Check for insufficient data to properly render a line chart.
+    // We require at least 2 data points per bin type group.
+    let insufficientData = false;
+    let message = '';
+    if (filter !== 'today') {
+      const counts = trendData.map((group) => group.data.length);
+      if (counts.every((count) => count < 2)) {
+        insufficientData = true;
+        message =
+          'Insufficient daily data to render a line chart. Please try a different date filter.';
+      }
+    } else {
+      const counts = trendData.map((group) => group.data.length);
+      if (counts.every((count) => count < 2)) {
+        insufficientData = true;
+        message = 'Insufficient hourly data to render a line chart. Please try again later.';
+      }
+    }
+
+    if (insufficientData) {
+      console.log('Insufficient data detected:', message);
+      return res.status(200).json(new ApiResponse(200, trendData, message));
+    }
+
     return res
       .status(200)
       .json(new ApiResponse(200, trendData, 'Waste trend chart data retrieved successfully'));
   } catch (error) {
+    console.error('Error in getWasteTrendChart:', error);
     throw new ApiError(500, 'Failed to fetch waste trend chart data');
   }
 });
-
 /**
  * getWasteTrendComparison
  * GET /api/v1/analytics/wasteTrendComparison

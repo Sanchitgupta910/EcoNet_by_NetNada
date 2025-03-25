@@ -98,16 +98,24 @@ const getPreviousDateRange = (filter, now = new Date()) => {
     case 'thisMonth': {
       const prevDate = new Date(now);
       prevDate.setUTCMonth(now.getUTCMonth() - 1);
-      previousStartDate = new Date(Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth(), 1, 0, 0, 0));
+      previousStartDate = new Date(
+        Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth(), 1, 0, 0, 0),
+      );
       // For simplicity, set previousEndDate as the last day of that month using 31; if no data exists for extra days it won't matter.
-      previousEndDate = new Date(Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth(), 31, 23, 59, 59, 999));
+      previousEndDate = new Date(
+        Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth(), 31, 23, 59, 59, 999),
+      );
       break;
     }
     case 'lastMonth': {
       const prevDate = new Date(now);
       prevDate.setUTCMonth(now.getUTCMonth() - 2);
-      previousStartDate = new Date(Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth(), 1, 0, 0, 0));
-      previousEndDate = new Date(Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+      previousStartDate = new Date(
+        Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth(), 1, 0, 0, 0),
+      );
+      previousEndDate = new Date(
+        Date.UTC(prevDate.getUTCFullYear(), prevDate.getUTCMonth() + 1, 0, 23, 59, 59, 999),
+      );
       break;
     }
     default: {
@@ -401,7 +409,7 @@ const getAdminOverview = asyncHandler(async (req, res) => {
   const totalWaste = latestRecords.reduce((sum, record) => sum + record.latestWeight, 0);
   const landfillDiversion = latestRecords.reduce(
     (sum, record) => (record.dustbinType !== 'General Waste' ? sum + record.latestWeight : sum),
-    0
+    0,
   );
   const currentDiversionPercentage =
     totalWaste > 0 ? Number(((landfillDiversion / totalWaste) * 100).toFixed(2)) : 0;
@@ -411,7 +419,7 @@ const getAdminOverview = asyncHandler(async (req, res) => {
   const prevTotalWaste = prevRecords.reduce((sum, record) => sum + record.latestWeight, 0);
   const prevLandfillDiversion = prevRecords.reduce(
     (sum, record) => (record.dustbinType !== 'General Waste' ? sum + record.latestWeight : sum),
-    0
+    0,
   );
   const totalWasteTrend =
     prevTotalWaste > 0
@@ -419,7 +427,9 @@ const getAdminOverview = asyncHandler(async (req, res) => {
       : 0;
   const landfillDiversionTrend =
     prevLandfillDiversion > 0
-      ? Number((((landfillDiversion - prevLandfillDiversion) / prevLandfillDiversion) * 100).toFixed(2))
+      ? Number(
+          (((landfillDiversion - prevLandfillDiversion) / prevLandfillDiversion) * 100).toFixed(2),
+        )
       : 0;
 
   const overviewData = {
@@ -799,10 +809,16 @@ const getWasteTrendComparison = asyncHandler(async (req, res) => {
   };
   const thisPeriodWaste = await aggregateWasteForPeriod(currentStart, currentEnd);
   const previousPeriodWaste = await aggregateWasteForPeriod(previousStartDate, previousEndDate);
-  let percentageChange = 0, trend = 'no change';
+  let percentageChange = 0,
+    trend = 'no change';
   if (previousPeriodWaste > 0) {
     percentageChange = ((thisPeriodWaste - previousPeriodWaste) / previousPeriodWaste) * 100;
-    trend = thisPeriodWaste > previousPeriodWaste ? 'higher' : thisPeriodWaste < previousPeriodWaste ? 'lower' : 'equal';
+    trend =
+      thisPeriodWaste > previousPeriodWaste
+        ? 'higher'
+        : thisPeriodWaste < previousPeriodWaste
+        ? 'lower'
+        : 'equal';
   } else {
     percentageChange = thisPeriodWaste > 0 ? 100 : 0;
     trend = thisPeriodWaste > 0 ? 'higher' : 'no change';
@@ -829,8 +845,10 @@ const getWasteLast7Days = asyncHandler(async (req, res) => {
   const { branchId } = req.query;
   if (!branchId) throw new ApiError(400, 'branchId is required');
   const today = new Date();
-  const { startDate, endDate } = getUTCDayRange(new Date(subDays(today, 6)));
-  // Pipeline for last 7 days using UTC day boundaries.
+  // Compute the start date (6 days ago) and end date (today) using UTC day boundaries.
+  const startDate = getUTCDayRange(new Date(subDays(today, 6))).startDate;
+  const endDate = getUTCDayRange(today).endDate;
+
   const pipeline = [
     { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
     {
@@ -1004,8 +1022,16 @@ const getRecyclingOverview = asyncHandler(async (req, res) => {
     totalWaste > 0 ? Number(((recyclingWaste / totalWaste) * 100).toFixed(2)) : 0;
 
   // Aggregate for previous period.
-  const { totalWaste: prevTotalWaste } = await aggregateWasteData(previousStartDate, previousEndDate, branchIds);
-  const prevRecyclingWaste = await aggregateRecyclingWasteData(previousStartDate, previousEndDate, branchIds);
+  const { totalWaste: prevTotalWaste } = await aggregateWasteData(
+    previousStartDate,
+    previousEndDate,
+    branchIds,
+  );
+  const prevRecyclingWaste = await aggregateRecyclingWasteData(
+    previousStartDate,
+    previousEndDate,
+    branchIds,
+  );
   const recyclingTrend =
     prevRecyclingWaste > 0
       ? Number((((recyclingWaste - prevRecyclingWaste) / prevRecyclingWaste) * 100).toFixed(2))
@@ -1064,7 +1090,13 @@ const getLeaderboardData = asyncHandler(async (req, res) => {
   if (branchIds.length === 0) {
     return res
       .status(200)
-      .json(new ApiResponse(200, { leaderboard: [], period: periodLabel }, 'No branches found for the given filter'));
+      .json(
+        new ApiResponse(
+          200,
+          { leaderboard: [], period: periodLabel },
+          'No branches found for the given filter',
+        ),
+      );
   }
 
   // Aggregation pipeline for leaderboard.
@@ -1116,7 +1148,9 @@ const getLeaderboardData = asyncHandler(async (req, res) => {
         branchName: { $first: '$branchDetails.officeName' },
         totalWaste: { $sum: '$cumulativeWaste' },
         landfillDiversion: {
-          $sum: { $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0] },
+          $sum: {
+            $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0],
+          },
         },
       },
     });
@@ -1140,7 +1174,9 @@ const getLeaderboardData = asyncHandler(async (req, res) => {
         _id: '$branchDetails.associatedCompany',
         totalWaste: { $sum: '$cumulativeWaste' },
         landfillDiversion: {
-          $sum: { $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0] },
+          $sum: {
+            $cond: [{ $ne: ['$binDetails.dustbinType', 'General Waste'] }, '$cumulativeWaste', 0],
+          },
         },
       },
     });
@@ -1172,7 +1208,13 @@ const getLeaderboardData = asyncHandler(async (req, res) => {
   const leaderboard = await Waste.aggregate(pipeline);
   return res
     .status(200)
-    .json(new ApiResponse(200, { leaderboard, period: periodLabel }, 'Leaderboard data fetched successfully'));
+    .json(
+      new ApiResponse(
+        200,
+        { leaderboard, period: periodLabel },
+        'Leaderboard data fetched successfully',
+      ),
+    );
 });
 
 // Export all functions.

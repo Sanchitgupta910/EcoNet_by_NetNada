@@ -428,44 +428,41 @@ const getMinimalOverview = asyncHandler(async (req, res) => {
  *
  * Query Parameters:
  *   - branchId (optional): The ObjectId of a specific branch.
- *   - companyId (optional): If provided and not "All Organizations", aggregates data across all branches for that company.
+ *   - companyId (optional): If provided and not set to "all" or "All Organizations", aggregates data across all branches for that company.
  *   - orgUnitId (optional): If provided, aggregates data across all branches associated with that organization unit.
  *   - filter (optional): One of "today", "thisWeek", "thisMonth", or "lastMonth". Defaults to "today".
+ *   - zoomDate (optional): An ISO date string. When provided (with non-"today" filters), returns hourly aggregation for that day.
  *
  * Expected Behavior:
- *   - When filter is "today": aggregates hourly data grouped by bin types.
- *   - For other filters: aggregates daily data from the start of the period (e.g. start of week/month) until today.
- *     * If the aggregation returns less than 2 data points (e.g. if today is Monday for "thisWeek"),
- *       an appropriate message is returned indicating insufficient data for a line chart.
- *   - When a company filter is applied (and not set to "All Organizations"), it groups all the branch data by bin types.
- *   - When no company filter is provided or it is set to "All Organizations", data is aggregated for all organizations.
+ *   - For "today" (or when zoomDate is provided): aggregates data by hour and pivots the data so that each document represents one hour.
+ *   - For other filters: aggregates data by date and pivots the data so that each document represents one day.
+ *   - The companyId parameter is sanitized so that if it equals "all" or "All Organizations" (case-insensitive), it is ignored.
+ *
+ * The final output is an array of documents each with a "time" field (hour or date) and, for each bin type encountered,
+ * a property with its aggregated waste weight.
  *
  * Notes:
- *   - Designed to be efficient for large datasets using optimized aggregation pipelines and compound indexes.
- *   - Key steps are logged to the console to facilitate debugging.
- *   - Edge cases are handled gracefully with clear messages.
+ *   - This pipeline leverages compound indexes on createdAt, associateBin, and branchAddress.
+ *   - Console logs have been added for debugging.
  */
-
 const getWasteTrendChart = asyncHandler(async (req, res) => {
   try {
-    // Set default filter to "today" if not provided.
-    let { branchId, companyId, orgUnitId, filter } = req.query;
+    let { branchId, companyId, orgUnitId, filter, zoomDate } = req.query;
     if (!filter) filter = 'today';
-    // Treat companyId "All Organizations" as if no company filter is applied.
-    if (companyId && companyId === 'All Organizations') {
+
+    // Sanitize companyId if it is "all" or "All Organizations"
+    if (
+      companyId &&
+      typeof companyId === 'string' &&
+      (companyId.toLowerCase() === 'all' || companyId.toLowerCase() === 'all organizations')
+    ) {
+      console.log('Sanitizing companyId; received:', companyId);
       companyId = undefined;
     }
-    console.log('getWasteTrendChart called with parameters:', {
-      branchId,
-      companyId,
-      orgUnitId,
-      filter,
-    });
 
-    // Determine branch IDs based on provided filters.
+    // Determine branch IDs from filters.
     let branchIds = [];
     if (!branchId && !companyId && !orgUnitId) {
-      // No specific filter provided; aggregate across all non-deleted branches.
       const allBranches = await BranchAddress.find({ isdeleted: false }).select('_id').lean();
       branchIds = allBranches.map((b) => b._id);
     } else if (branchId) {
@@ -494,11 +491,9 @@ const getWasteTrendChart = asyncHandler(async (req, res) => {
       }
       switch (orgUnit.type) {
         case 'Branch':
-          if (orgUnit.branchAddress) {
+          if (orgUnit.branchAddress)
             branchIds = [new mongoose.Types.ObjectId(orgUnit.branchAddress)];
-          } else {
-            throw new ApiError(400, 'Branch OrgUnit missing branchAddress field');
-          }
+          else throw new ApiError(400, 'Branch OrgUnit missing branchAddress field');
           break;
         case 'City':
           branchIds = (
@@ -521,7 +516,6 @@ const getWasteTrendChart = asyncHandler(async (req, res) => {
           ).map((b) => b._id);
           break;
         default:
-          // Fallback: get all branches.
           const allBranchesOrg = await BranchAddress.find({ isdeleted: false })
             .select('_id')
             .lean();
@@ -530,31 +524,37 @@ const getWasteTrendChart = asyncHandler(async (req, res) => {
     }
     if (branchIds.length === 0) throw new ApiError(404, 'No branches found for the given filter');
 
-    // Determine the date range based on the filter.
+    // Determine date range.
     const now = new Date();
     let startDate, endDate;
-    if (filter === 'today') {
-      startDate = startOfDay(now);
-      endDate = endOfDay(now);
-    } else if (filter === 'thisWeek') {
-      // Actual week: from start of week (Monday) until now.
-      startDate = startOfWeek(now, { weekStartsOn: 1 });
-      endDate = now;
-    } else if (filter === 'thisMonth') {
-      startDate = startOfMonth(now);
-      endDate = now;
-    } else if (filter === 'lastMonth') {
-      const lastMonthDate = subMonths(now, 1);
-      startDate = startOfMonth(lastMonthDate);
-      endDate = endOfMonth(lastMonthDate);
+    if (zoomDate && filter !== 'today') {
+      const zoomedDate = new Date(zoomDate);
+      if (isNaN(zoomedDate)) throw new ApiError(400, 'Invalid zoomDate format');
+      startDate = startOfDay(zoomedDate);
+      endDate = endOfDay(zoomedDate);
+      console.log('Zoom mode active for date:', zoomedDate);
     } else {
-      // Default to today if filter is unrecognized.
-      startDate = startOfDay(now);
-      endDate = endOfDay(now);
+      if (filter === 'today') {
+        startDate = startOfDay(now);
+        endDate = endOfDay(now);
+      } else if (filter === 'thisWeek') {
+        startDate = startOfWeek(now, { weekStartsOn: 1 });
+        endDate = now;
+      } else if (filter === 'thisMonth') {
+        startDate = startOfMonth(now);
+        endDate = now;
+      } else if (filter === 'lastMonth') {
+        const lastMonthDate = subMonths(now, 1);
+        startDate = startOfMonth(lastMonthDate);
+        endDate = endOfMonth(lastMonthDate);
+      } else {
+        startDate = startOfDay(now);
+        endDate = endOfDay(now);
+      }
     }
-    console.log('Date range for aggregation:', { startDate, endDate });
+    console.log('Date range:', { startDate, endDate });
 
-    // Base stages for the aggregation pipeline.
+    // Base aggregation stages.
     const baseStages = [
       { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
       {
@@ -570,104 +570,90 @@ const getWasteTrendChart = asyncHandler(async (req, res) => {
     ];
 
     let pipeline;
-    if (filter === 'today') {
-      // For "today", aggregate hourly data.
+    if (filter === 'today' || (zoomDate && filter !== 'today')) {
+      // Hourly pivot aggregation.
       pipeline = [
         ...baseStages,
-        { $sort: { associateBin: 1, createdAt: -1 } },
+        { $sort: { createdAt: 1 } },
         {
           $group: {
-            _id: { bin: '$associateBin', hour: { $hour: '$createdAt' } },
-            weight: { $first: '$currentWeight' },
-            binType: { $first: '$binData.dustbinType' },
-          },
-        },
-        {
-          $group: {
-            _id: { binType: '$binType', hour: '$_id.hour' },
-            totalWeight: { $sum: '$weight' },
+            _id: {
+              hour: { $hour: '$createdAt' },
+              binType: '$binData.dustbinType',
+            },
+            totalWeight: { $sum: '$currentWeight' },
           },
         },
         { $sort: { '_id.hour': 1 } },
         {
           $group: {
-            _id: '$_id.binType',
-            data: { $push: { hour: '$_id.hour', weight: '$totalWeight' } },
+            _id: '$_id.hour',
+            values: {
+              $push: { binType: '$_id.binType', weight: '$totalWeight' },
+            },
           },
         },
-        { $project: { _id: 0, binName: '$_id', data: 1 } },
-        { $sort: { binName: 1 } },
+        { $sort: { _id: 1 } },
+        {
+          $project: {
+            time: '$_id',
+            _id: 0,
+            values: 1,
+          },
+        },
       ];
     } else {
-      // For non-"today" filters, aggregate daily data from the start of the period until today.
+      // Daily pivot aggregation.
       pipeline = [
         ...baseStages,
-        { $sort: { associateBin: 1, createdAt: 1 } },
+        { $sort: { createdAt: 1 } },
         {
           $group: {
             _id: {
-              bin: '$associateBin',
               date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+              binType: '$binData.dustbinType',
             },
-            weight: { $last: '$currentWeight' },
-            binType: { $first: '$binData.dustbinType' },
-          },
-        },
-        {
-          $group: {
-            _id: { binType: '$binType', date: '$_id.date' },
-            totalWeight: { $sum: '$weight' },
+            totalWeight: { $sum: '$currentWeight' },
           },
         },
         { $sort: { '_id.date': 1 } },
         {
           $group: {
-            _id: '$_id.binType',
-            data: { $push: { date: '$_id.date', weight: '$totalWeight' } },
+            _id: '$_id.date',
+            values: {
+              $push: { binType: '$_id.binType', weight: '$totalWeight' },
+            },
           },
         },
-        { $project: { _id: 0, binName: '$_id', data: 1 } },
-        { $sort: { binName: 1 } },
+        { $sort: { _id: 1 } },
+        {
+          $project: {
+            time: '$_id',
+            _id: 0,
+            values: 1,
+          },
+        },
       ];
     }
-    console.log('Aggregation pipeline:', JSON.stringify(pipeline, null, 2));
 
-    // Execute the aggregation pipeline with allowDiskUse for large datasets.
-    const trendData = await Waste.aggregate(pipeline).allowDiskUse(true);
-    console.log('Aggregated trend data:', trendData);
+    const pivotData = await Waste.aggregate(pipeline).allowDiskUse(true);
 
-    // Check for insufficient data to properly render a line chart.
-    // We require at least 2 data points per bin type group.
-    let insufficientData = false;
-    let message = '';
-    if (filter !== 'today') {
-      const counts = trendData.map((group) => group.data.length);
-      if (counts.every((count) => count < 2)) {
-        insufficientData = true;
-        message =
-          'Insufficient daily data to render a line chart. Please try a different date filter.';
-      }
-    } else {
-      const counts = trendData.map((group) => group.data.length);
-      if (counts.every((count) => count < 2)) {
-        insufficientData = true;
-        message = 'Insufficient hourly data to render a line chart. Please try again later.';
-      }
+    // Optionally, check that there are at least 2 data points in the pivot.
+    if (pivotData.length < 2) {
+      console.log('Insufficient data:', pivotData);
+      return res
+        .status(200)
+        .json(new ApiResponse(200, pivotData, 'Insufficient data to render a line chart.'));
     }
-
-    if (insufficientData) {
-      console.log('Insufficient data detected:', message);
-      return res.status(200).json(new ApiResponse(200, trendData, message));
-    }
-
     return res
       .status(200)
-      .json(new ApiResponse(200, trendData, 'Waste trend chart data retrieved successfully'));
+      .json(new ApiResponse(200, pivotData, 'Waste trend chart data retrieved successfully'));
   } catch (error) {
     console.error('Error in getWasteTrendChart:', error);
     throw new ApiError(500, 'Failed to fetch waste trend chart data');
   }
 });
+
 /**
  * getWasteTrendComparison
  * GET /api/v1/analytics/wasteTrendComparison

@@ -490,7 +490,7 @@ const getAllUser = asyncHandler(async (req, res) => {
     })
     .populate({
       path: 'createdby',
-      select: 'fullName email',
+      select: 'fullName email role',
     })
     .select('-password -refreshToken');
 

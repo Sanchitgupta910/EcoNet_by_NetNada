@@ -20,7 +20,7 @@ const invitationSchema = new mongoose.Schema({
   company: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Company',
-    required: true,
+    // required: true,
   },
   token: {
     type: String,

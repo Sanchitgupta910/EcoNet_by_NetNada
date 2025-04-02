@@ -1,16 +1,15 @@
 import { Router } from 'express';
 import { verifyJWT } from '../middlewares/auth.middleware.js';
 import {
-  getBinStatus,
   getLatestBinWeight,
+  getBinStatus,
+  getAdminOverview,
   getMinimalOverview,
   getWasteLast7Days,
-  getWasteTrendComparison,
-  getAdminOverview,
-  getWasteTrendChart,
   getActivityFeed,
-  getRecyclingOverview,
   getLeaderboardData,
+  getWasteTrendChart,
+  getWasteDispositionRates,
 } from '../controllers/analytics.controllers.js';
 import { getOffices } from '../controllers/offices.controllers.js';
 
@@ -22,18 +21,17 @@ router.get('/latestBinWeight', verifyJWT, getLatestBinWeight);
 router.get('/binStatus', verifyJWT, getBinStatus);
 router.get('/minimalOverview', verifyJWT, getMinimalOverview);
 router.get('/wasteLast7Days', verifyJWT, getWasteLast7Days);
-router.get('/wasteTrendComparison', verifyJWT, getWasteTrendComparison);
-router.get('/recyclingOverview', getRecyclingOverview);
+
 // Admin Overview and Trend Chart Endpoints
 router.get('/adminOverview', verifyJWT, getAdminOverview);
 router.get('/wasteTrendChart', verifyJWT, getWasteTrendChart);
+router.get('/wasteDisposition', verifyJWT, getWasteDispositionRates);
 
 // Activity Feed and Leaderboard Endpoints
 router.get('/activityFeed', verifyJWT, getActivityFeed);
-
 router.get('/leaderboard', getLeaderboardData);
 
-// Offices Endpoint integrated here for admin dashboard use
+// Offices Endpoint for admin dashboard use
 router.get('/offices', verifyJWT, getOffices);
 
 export default router;

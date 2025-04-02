@@ -26,5 +26,5 @@ const wasteSchema = new mongoose.Schema(
 );
 
 //Creating a compound index for faster queries
-wasteSchema.index({ createdAt: 1, associateBin: 1 });
+wasteSchema.index({ createdAt: -1, associateBin: 1 });
 export const Waste = mongoose.model('Waste', wasteSchema);

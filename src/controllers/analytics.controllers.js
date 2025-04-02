@@ -334,86 +334,75 @@ const getMinimalOverview = asyncHandler(async (req, res) => {
   const now = new Date();
   const { startDate, endDate } = getUTCDayRange(now);
 
-  // Trend data: sum of latest reading per bin per day.
-  const trendPipeline = [
+  // Pipeline for computing today's waste for the branch (using only the latest reading per bin)
+  const branchWasteAgg = await Waste.aggregate([
     { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+    {
+      $lookup: {
+        from: 'dustbins',
+        localField: 'associateBin',
+        foreignField: '_id',
+        as: 'binData',
+      },
+    },
+    { $unwind: '$binData' },
+    { $match: { 'binData.branchAddress': new mongoose.Types.ObjectId(branchId) } },
     { $sort: { associateBin: 1, createdAt: -1 } },
     {
       $group: {
-        _id: {
-          bin: '$associateBin',
-          date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'UTC' } },
-        },
-        weight: { $first: '$currentWeight' },
+        _id: '$associateBin',
+        latestWeight: { $first: '$currentWeight' },
       },
     },
-    {
-      $group: {
-        _id: '$_id.date',
-        totalWeight: { $sum: '$weight' },
-      },
-    },
-    { $sort: { _id: 1 } },
-  ];
-  const trendData = await Waste.aggregate(trendPipeline, { allowDiskUse: true });
-
-  // Today's waste: sum of latest reading per bin.
-  const branchWasteAgg = await Waste.aggregate(
-    [
-      { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
-      { $sort: { associateBin: 1, createdAt: -1 } },
-      {
-        $group: {
-          _id: '$associateBin',
-          latestWeight: { $first: '$currentWeight' },
-        },
-      },
-      { $group: { _id: null, totalBranchWaste: { $sum: '$latestWeight' } } },
-    ],
-    { allowDiskUse: true },
-  );
+    { $group: { _id: null, totalBranchWaste: { $sum: '$latestWeight' } } },
+  ]).option({ allowDiskUse: true });
   const todayWaste = branchWasteAgg[0]?.totalBranchWaste || 0;
 
-  // Company-wide waste.
+  // Retrieve the branch's company from the BranchAddress record.
   const branchRecord = await BranchAddress.findById(branchId).lean();
   if (!branchRecord) throw new ApiError(404, 'Branch not found');
   const compId = branchRecord.associatedCompany;
+
+  // Find all branches belonging to that company.
   const companyBranches = await BranchAddress.find({
     associatedCompany: new mongoose.Types.ObjectId(compId),
   })
     .select('_id')
     .lean();
   const branchIds = companyBranches.map((b) => b._id);
-  const companyWasteAgg = await Waste.aggregate(
-    [
-      { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
-      { $sort: { associateBin: 1, createdAt: -1 } },
-      {
-        $group: {
-          _id: '$associateBin',
-          latestWeight: { $first: '$currentWeight' },
-        },
+
+  // Pipeline for computing total company waste (using only the latest reading per bin)
+  const companyWasteAgg = await Waste.aggregate([
+    { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+    {
+      $lookup: {
+        from: 'dustbins',
+        localField: 'associateBin',
+        foreignField: '_id',
+        as: 'binData',
       },
-      {
-        $lookup: {
-          from: 'dustbins',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'binData',
-        },
+    },
+    { $unwind: '$binData' },
+    { $match: { 'binData.branchAddress': { $in: branchIds } } },
+    { $sort: { associateBin: 1, createdAt: -1 } },
+    {
+      $group: {
+        _id: '$associateBin',
+        latestWeight: { $first: '$currentWeight' },
       },
-      { $unwind: '$binData' },
-      { $match: { 'binData.branchAddress': { $in: branchIds } } },
-      { $group: { _id: null, totalCompanyWaste: { $sum: '$latestWeight' } } },
-    ],
-    { allowDiskUse: true },
-  );
+    },
+    { $group: { _id: null, totalCompanyWaste: { $sum: '$latestWeight' } } },
+  ]).option({ allowDiskUse: true });
   const totalCompanyWaste = companyWasteAgg[0]?.totalCompanyWaste || 0;
+
+  // Calculate branch contribution as percentage.
   const branchContribution = totalCompanyWaste
     ? Math.round((todayWaste / totalCompanyWaste) * 100)
     : 0;
 
-  const overview = { todayWaste, trendData, branchContribution };
+  // Optionally, you can also pass trendData etc. as needed.
+  const overview = { todayWaste, branchContribution };
+
   return res
     .status(200)
     .json(new ApiResponse(200, overview, 'Minimal overview data fetched successfully'));

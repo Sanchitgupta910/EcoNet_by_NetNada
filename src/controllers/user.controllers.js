@@ -1,5 +1,7 @@
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiError } from '../utils/ApiError.js';
+import mongoose from 'mongoose';
+
 import { User } from '../models/user.models.js';
 import { sendInvitationEmail, sendCompleteRegistrationEmail } from '../utils/EmailService.js';
 import { Company } from '../models/company.models.js';
@@ -619,52 +621,73 @@ const resetPassword = asyncHandler(async (req, res) => {
  * inviteUser
  * ---------------------------
  * Endpoint for higher-level admins to invite a user.
- * This function:
- *  - Validates the request (email, role, OrgUnit, company are required)
- *  - Generates a unique invitation token and expiration (24 hours)
- *  - Creates an invitation record in the database
- *  - Sends a complete registration invitation email (with a registration link that includes the token)
+ * Validates required fields and ensures the company field is stored as an ObjectId.
+ * Logs the raw company value to help diagnose issues.
+ *
+ * Expected request body:
+ *   - email, role, OrgUnit, company
+ *     • The 'company' field should be either a valid company ID string or an object with an _id property.
  *
  * @route POST /api/v1/users/invite
  */
 const inviteUser = asyncHandler(async (req, res) => {
-  // Destructure and validate required fields from the request body.
   const { email, role, OrgUnit, company } = req.body;
   if (!email || !role || !OrgUnit || !company) {
     throw new ApiError(400, 'Email, role, OrgUnit, and company are required.');
   }
 
-  // Generate a unique invitation token using crypto and set an expiration (24 hours)
+  // Log the raw company value and its type for debugging.
+  console.log('InviteUser - Raw company value:', JSON.stringify(company), 'Type:', typeof company);
+
+  // Ensure company is stored as an ObjectId.
+  let companyId;
+  if (typeof company === 'object' && company !== null) {
+    if (!company._id) {
+      throw new ApiError(400, 'Invalid company value provided: missing _id field.');
+    }
+    companyId = company._id;
+  } else if (typeof company === 'string') {
+    companyId = company;
+  } else {
+    throw new ApiError(400, 'Invalid company value provided.');
+  }
+
+  try {
+    companyId = new mongoose.Types.ObjectId(companyId);
+  } catch (error) {
+    console.error('Error converting company value to ObjectId:', error);
+    throw new ApiError(400, 'Invalid company value provided.');
+  }
+
+  // Generate a unique invitation token and set an expiration (24 hours)
   const token = crypto.randomBytes(20).toString('hex');
   const expires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
 
-  // Create the invitation record
+  // Create the invitation record with company as an ObjectId.
   const invitation = await Invitation.create({
     email,
     role,
     OrgUnit,
-    company,
+    company: companyId,
     token,
     expires,
   });
 
-  // Prepare the invitation link using the FRONTEND_URL from your environment
+  // Prepare the invitation link using the FRONTEND_URL from environment variables.
   const invitationLink = `${process.env.FRONTEND_URL}/user-setup?token=${token}&email=${email}`;
 
-  // Fetch company details for email personalization
+  // Fetch company details for email personalization.
   let companyDetails;
   try {
-    companyDetails = await Company.findById(company);
+    companyDetails = await Company.findById(companyId);
   } catch (error) {
     console.error('Error fetching company details for invitation:', error);
     companyDetails = { CompanyName: 'Your Company Name' };
   }
 
-  // Determine first name (if available, you might improve this by storing firstName separately)
   const firstName = email.split('@')[0];
 
   try {
-    // Send the complete registration invitation email.
     await sendCompleteRegistrationEmail({
       to: email,
       firstName,
@@ -679,8 +702,7 @@ const inviteUser = asyncHandler(async (req, res) => {
     throw new ApiError(500, 'Error sending invitation email. Please try again later.');
   }
 
-  // Return a successful response
-  return res.status(201).json({ message: 'Invitation sent successfully.' });
+  return res.status(201).json(new ApiResponse(200, {}, 'Invitation sent successfully.'));
 });
 
 /**

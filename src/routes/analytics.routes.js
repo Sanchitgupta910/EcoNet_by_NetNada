@@ -29,7 +29,7 @@ router.get('/wasteDisposition', verifyJWT, getWasteDispositionRates);
 
 // Activity Feed and Leaderboard Endpoints
 router.get('/activityFeed', verifyJWT, getActivityFeed);
-router.get('/leaderboard', getLeaderboardData);
+router.get('/leaderboard', verifyJWT , getLeaderboardData);
 
 // Offices Endpoint for admin dashboard use
 router.get('/offices', verifyJWT, getOffices);

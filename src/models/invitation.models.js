@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-
+import { Company } from './company.models.js';
 // Define the schema for invitations.
 const invitationSchema = new mongoose.Schema({
   email: {
@@ -19,8 +19,8 @@ const invitationSchema = new mongoose.Schema({
   },
   company: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Company',
-    // required: true,
+    ref: Company,
+    required: true,
   },
   token: {
     type: String,

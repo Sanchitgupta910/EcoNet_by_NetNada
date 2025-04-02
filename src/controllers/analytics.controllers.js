@@ -265,8 +265,6 @@ const getAdminOverview = asyncHandler(async (req, res) => {
 
   const branches = await BranchAddress.find(branchFilter).select('_id').lean();
   const branchIds = branches.map((b) => b._id);
-  console.log(`[AdminOverview] Branch Filter: ${JSON.stringify(branchFilter)}`);
-  console.log(`[AdminOverview] Branch IDs: ${branchIds}`);
 
   if (branchIds.length === 0) {
     const overviewData = {
@@ -319,13 +317,6 @@ const getAdminOverview = asyncHandler(async (req, res) => {
     totalWasteTrend,
     landfillDiversionTrend,
   };
-
-  console.log(
-    `[AdminOverview] Total Waste: ${totalWaste}, Prev Total Waste: ${prevTotalWaste}, Trend: ${totalWasteTrend}%`,
-  );
-  console.log(
-    `[AdminOverview] Landfill Diversion: ${landfillDiversion}, Prev Diversion: ${prevLandfillDiversion}, Trend: ${landfillDiversionTrend}%`,
-  );
 
   return res
     .status(200)

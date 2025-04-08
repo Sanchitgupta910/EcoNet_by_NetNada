@@ -6,7 +6,7 @@ import { addDustbin, getCurrentWeight, aggregatedWasteData } from "../controller
 
 const router = Router()
 
-router.route("/adddustbin").post(verifyJWT, addDustbin);
+router.route("/adddustbin").post(verifyJWT, authorizeRoles("SuperAdmin"), addDustbin);
 router.route("/currentweight/:id").get(verifyJWT, getCurrentWeight);
 //router.route("/bindetails").get(verifyJWT, getCompanyWithDustbins);
 router.get('/aggregated', aggregatedWasteData);

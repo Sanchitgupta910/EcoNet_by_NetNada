@@ -5,7 +5,7 @@ import { ApiResponse } from '../utils/ApiResponse.js';
 import { Waste } from '../models/waste.models.js';
 import { Dustbin } from '../models/dustbin.models.js';
 import { BranchAddress } from '../models/branchAddress.models.js';
-import { getUTCDayRange } from './analytics.controllers.js';
+import { getUTCDayRange } from './SuperAdminAnalytics.controllers.js';
 import { subDays } from 'date-fns';
 
 /**

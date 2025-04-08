@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { verifyJWT } from '../middlewares/auth.middleware.js';
-import {getLatestBinWeight, getBinStatus, getMinimalOverview, getWasteLast7Days} from '../controllers/binDashboardAnalytics.controllers.js';
+import {getLatestBinWeight, getBinStatus, getMinimalOverview, getWasteLast7Days} from '../controllers/binDashboardAnalytics.controllers.js'
 
 
 

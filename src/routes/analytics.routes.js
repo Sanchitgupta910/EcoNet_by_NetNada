@@ -6,7 +6,7 @@ import {
   getLeaderboardData,
   getWasteTrendChart,
   getWasteDispositionRates,
-} from '../controllers/analytics.controllers.js';
+} from '../controllers/SuperAdminAnalytics.controllers.js';
 import { getOffices } from '../controllers/offices.controllers.js';
 
 // Create a new router instance

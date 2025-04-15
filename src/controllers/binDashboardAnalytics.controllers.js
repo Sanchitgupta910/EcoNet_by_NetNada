@@ -52,6 +52,7 @@ const getBinStatus = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, binStatus, 'Bin status data fetched successfully'));
 });
+
 /**
  * getMinimalOverview:
  * Computes branch-level metrics for the employee dashboard.
@@ -183,4 +184,38 @@ const getWasteLast7Days = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, wasteData, 'Waste data for last 7 days retrieved successfully'));
 });
-export { getLatestBinWeight, getBinStatus, getMinimalOverview, getWasteLast7Days };
+
+/**
+ * initRealTimeUpdates:
+ * Initializes a MongoDB change stream on the Waste collection and emits a real-time
+ * Socket.io event whenever a new waste record is inserted.
+ *
+ * To use this, pass in your Socket.io server instance (io) from your main server file.
+ */
+const initRealTimeUpdates = (io) => {
+  // Create a change stream on the Waste collection
+  const changeStream = Waste.watch();
+
+  changeStream.on('change', (change) => {
+    // We are interested in new records, i.e. when a document is inserted.
+    if (change.operationType === 'insert') {
+      // Emit a Socket.io event with the new record details.
+      io.emit('newWasteEntry', change.fullDocument);
+      // Optionally, you could perform additional logic such as updating other
+      // collections or broadcasting a summary update for the dashboard.
+      console.log('New waste entry detected and emitted via Socket.io');
+    }
+  });
+
+  changeStream.on('error', (error) => {
+    console.error('Error in Waste change stream: ', error);
+  });
+};
+
+export {
+  getLatestBinWeight,
+  getBinStatus,
+  getMinimalOverview,
+  getWasteLast7Days,
+  initRealTimeUpdates,
+};

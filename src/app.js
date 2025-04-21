@@ -2,7 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import http from 'http';
-import { Server } from 'socket.io';
+import { Server as IOServer } from 'socket.io';
+import redis from './utils/redisClient.js';
 
 //Routes import
 import CompanyRouter from './routes/company.routes.js';
@@ -14,7 +15,6 @@ import AnalyticsRouter from './routes/analytics.routes.js';
 import OrgUnitRouter from './routes/orgUnit.routes.js';
 import BinDashboardAnalyticsRouter from './routes/binDashboardAnalytics.routes.js';
 import LocalAdminAnalyticsRouter from './routes/LocalAdminAnalytics.routes.js';
-// import { initRealTimeUpdates } from './controllers/binDashboardAnalytics.controllers.js';
 
 const app = express();
 app.use(
@@ -40,29 +40,50 @@ app.use('/api/v1/orgUnits', OrgUnitRouter);
 app.use('/api/v1/binDashboardAnalytics', BinDashboardAnalyticsRouter);
 app.use('/api/v1/localAdminAnalytics', LocalAdminAnalyticsRouter);
 
-// Create HTTP server and attach Socket.io
+// Create HTTP server & attach Socket.io
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: process.env.CORS_ORIGIN,
-    credentials: true,
-  },
+const io = new IOServer(server, {
+  cors: { origin: process.env.CORS_ORIGIN, credentials: true },
   transports: ['websocket'],
-  pingInterval: 5000, // send a ping every 5 seconds
+  pingInterval: 5000,
   pingTimeout: 5000,
 });
 
-// Socket.io connection handling
-// io.on('connection', (socket) => {
-//   console.log(`Client connected: ${socket.id}`);
+// Robust subscriber setup
+(async () => {
+  const sub = redis.duplicate();
 
-//   socket.on('disconnect', () => {
-//     console.log(`Client disconnected: ${socket.id}`);
-//   });
-// });
+  sub.on('error', (err) => {
+    console.error('Redis subscriber error:', err);
+  });
 
-// // Initialize real-time updates using Socket.io.
+  // no await sub.connect()
+  await sub.subscribe('waste‑updates', (message) => {
+    if (!message) return;
+    let data;
+    try {
+      data = JSON.parse(message);
+    } catch {
+      console.warn('⚠️ bad JSON on waste‑updates:', message);
+      return;
+    }
+    const { branchId, payload } = data || {};
+    if (branchId && payload) {
+      io.to(branchId).emit('wasteUpdate', payload);
+    }
+  });
+})().catch((err) => {
+  console.error('🔥 Failed to set up Redis subscription:', err);
+});
 
-// initRealTimeUpdates(io);
+// Socket.io connection
+io.on('connection', (socket) => {
+  const { branchId } = socket.handshake.query;
+  if (branchId) socket.join(branchId);
+
+  socket.on('disconnect', () => {
+    if (branchId) socket.leave(branchId);
+  });
+});
 
 export { app, server };

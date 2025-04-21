@@ -52,7 +52,6 @@ const getBinStatus = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, binStatus, 'Bin status data fetched successfully'));
 });
-
 /**
  * getMinimalOverview:
  * Computes branch-level metrics for the employee dashboard.
@@ -186,36 +185,83 @@ const getWasteLast7Days = asyncHandler(async (req, res) => {
 });
 
 /**
- * initRealTimeUpdates:
- * Initializes a MongoDB change stream on the Waste collection and emits a real-time
- * Socket.io event whenever a new waste record is inserted.
- *
- * To use this, pass in your Socket.io server instance (io) from your main server file.
+ * getWasteTrendComparison:
+ * Compares total waste of this week vs last week for a branch,
+ * logs debug information to console.
  */
-const initRealTimeUpdates = (io) => {
-  // Create a change stream on the Waste collection
-  const changeStream = Waste.watch();
+const getWasteTrendComparison = asyncHandler(async (req, res) => {
+  const { branchId } = req.query;
+  console.log('🔍 getWasteTrendComparison called with branchId:', branchId);
+  if (!branchId) throw new ApiError(400, 'branchId is required');
+  if (!mongoose.Types.ObjectId.isValid(branchId))
+    throw new ApiError(400, 'Invalid branchId format');
 
-  changeStream.on('change', (change) => {
-    // We are interested in new records, i.e. when a document is inserted.
-    if (change.operationType === 'insert') {
-      // Emit a Socket.io event with the new record details.
-      io.emit('newWasteEntry', change.fullDocument);
-      // Optionally, you could perform additional logic such as updating other
-      // collections or broadcasting a summary update for the dashboard.
-      console.log('New waste entry detected and emitted via Socket.io');
-    }
-  });
+  const today = new Date();
+  const { startDate: thisWeekStart } = getUTCDayRange(subDays(today, 6));
+  const { endDate: thisWeekEnd } = getUTCDayRange(today);
+  const { startDate: lastWeekStart } = getUTCDayRange(subDays(today, 13));
+  const { endDate: lastWeekEnd } = getUTCDayRange(subDays(today, 7));
+  console.log('📆 Date Ranges:', { thisWeekStart, thisWeekEnd, lastWeekStart, lastWeekEnd });
 
-  changeStream.on('error', (error) => {
-    console.error('Error in Waste change stream: ', error);
-  });
-};
+  const getPeriodTotal = async (startDate, endDate) => {
+    const agg = await Waste.aggregate([
+      { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
+        },
+      },
+      { $unwind: '$binData' },
+      { $match: { 'binData.branchAddress': new mongoose.Types.ObjectId(branchId) } },
+      { $sort: { associateBin: 1, createdAt: -1 } },
+      {
+        $group: {
+          _id: '$associateBin',
+          latestWeight: { $first: '$currentWeight' },
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$latestWeight' } } },
+    ]).option({ allowDiskUse: true });
+    return agg[0]?.total || 0;
+  };
+
+  const thisWeekTotal = await getPeriodTotal(thisWeekStart, thisWeekEnd);
+  const lastWeekTotal = await getPeriodTotal(lastWeekStart, lastWeekEnd);
+  console.log('🔢 Totals:', { thisWeekTotal, lastWeekTotal });
+
+  let percentChange = 0;
+  if (lastWeekTotal > 0) {
+    const rawChange = ((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100;
+    percentChange = parseFloat(rawChange.toFixed(2));
+  }
+  console.log('📈 percentChange:', percentChange);
+
+  const trend = percentChange > 0 ? 'higher' : percentChange < 0 ? 'lower' : 'equal';
+  const message = `This week total waste collection (${Math.abs(thisWeekTotal).toFixed(
+    2,
+  )} KG) is ${Math.abs(percentChange).toFixed(
+    2,
+  )}% ${trend} compared to last week (${lastWeekTotal} KG)`;
+  console.log('📣 message:', message);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        { thisWeekTotal, lastWeekTotal, percentChange, trend, message },
+        'Waste trend comparison fetched successfully',
+      ),
+    );
+});
 
 export {
   getLatestBinWeight,
   getBinStatus,
   getMinimalOverview,
   getWasteLast7Days,
-  initRealTimeUpdates,
+  getWasteTrendComparison,
 };

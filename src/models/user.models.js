@@ -31,6 +31,16 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
+      enum: [
+        'SuperAdmin',
+        'RegionalAdmin',
+        'CountryAdmin',
+        'CityAdmin',
+        'OfficeAdmin',
+        'EmployeeDashboardUser',
+        'BinDisplayUser',
+      ],
+      required: true,
     },
     refreshToken: {
       type: String,
@@ -115,9 +125,6 @@ userSchema.methods.generateRefreshToken = function () {
     },
   );
 };
-
-// Plugin to enable aggregate pagination when required (commented out for now)
-// userSchema.plugin(mongooseAggregatePaginate);  // Uncomment when need pagination for aggregate queries
 
 // Export the User model so it can be used in other parts of the application
 export const User = mongoose.model('User', userSchema);

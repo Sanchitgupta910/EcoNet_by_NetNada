@@ -34,7 +34,7 @@ export const getUTCDayRange = (date) => {
  * getDateRangeFromFilterUTC:
  * Returns start and end dates based on filter ("today", "thisWeek", "thisMonth", "lastMonth")
  */
-const getDateRangeFromFilterUTC = (filter, now = new Date()) => {
+export const getDateRangeFromFilterUTC = (filter, now = new Date()) => {
   let startDate, endDate;
   switch (filter) {
     case 'today': {
@@ -77,7 +77,7 @@ const getDateRangeFromFilterUTC = (filter, now = new Date()) => {
  * getPreviousDateRange:
  * Returns the previous period's date range based on the current filter.
  */
-const getPreviousDateRange = (filter, now = new Date()) => {
+export const getPreviousDateRange = (filter, now = new Date()) => {
   let previousStartDate, previousEndDate;
   switch (filter) {
     case 'today': {

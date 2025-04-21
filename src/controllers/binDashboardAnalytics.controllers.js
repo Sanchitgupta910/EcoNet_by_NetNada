@@ -258,10 +258,78 @@ const getWasteTrendComparison = asyncHandler(async (req, res) => {
     );
 });
 
+/**
+ * getDiversionRate:
+ * Retrieves today’s diversion % and the change vs. yesterday for a branch.
+ */
+const getDiversionRate = asyncHandler(async (req, res) => {
+  const { branchId } = req.query;
+  if (!branchId) throw new ApiError(400, 'branchId is required');
+  if (!mongoose.Types.ObjectId.isValid(branchId))
+    throw new ApiError(400, 'Invalid branchId format');
+
+  // helper to run one-day pipeline
+  const oneDay = async (startDate, endDate) => {
+    const recs = await Waste.aggregate([
+      { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+      {
+        $lookup: {
+          from: 'dustbins',
+          localField: 'associateBin',
+          foreignField: '_id',
+          as: 'binData',
+        },
+      },
+      { $unwind: '$binData' },
+      { $match: { 'binData.branchAddress': new mongoose.Types.ObjectId(branchId) } },
+      { $sort: { associateBin: 1, createdAt: -1 } },
+      {
+        $group: {
+          _id: '$associateBin',
+          latestWeight: { $first: '$currentWeight' },
+          binType: { $first: '$binData.dustbinType' },
+        },
+      },
+    ]).option({ allowDiskUse: true });
+
+    let total = 0,
+      diverted = 0;
+    for (const { latestWeight, binType } of recs) {
+      total += latestWeight;
+      if (binType !== 'General Waste') diverted += latestWeight;
+    }
+    const pct = total > 0 ? Number(((diverted / total) * 100).toFixed(2)) : 0;
+    return pct;
+  };
+
+  // today
+  const now = new Date();
+  const { startDate: todayStart, endDate: todayEnd } = getUTCDayRange(now);
+  const todayPct = await oneDay(todayStart, todayEnd);
+
+  // yesterday
+  const yesterday = subDays(now, 1);
+  const { startDate: yStart, endDate: yEnd } = getUTCDayRange(yesterday);
+  const yesterdayPct = await oneDay(yStart, yEnd);
+
+  const trendValue = Number((todayPct - yesterdayPct).toFixed(2));
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        { diversionPercentage: todayPct, trendValue },
+        'Branch diversion rate fetched successfully',
+      ),
+    );
+});
+
 export {
   getLatestBinWeight,
   getBinStatus,
   getMinimalOverview,
   getWasteLast7Days,
   getWasteTrendComparison,
+  getDiversionRate,
 };

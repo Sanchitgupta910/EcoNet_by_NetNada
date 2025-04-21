@@ -6,6 +6,7 @@ import {
   getMinimalOverview,
   getWasteLast7Days,
   getWasteTrendComparison,
+  getDiversionRate,
 } from '../controllers/binDashboardAnalytics.controllers.js';
 
 const router = Router();
@@ -15,4 +16,5 @@ router.get('/binStatus', verifyJWT, getBinStatus);
 router.get('/minimalOverview', verifyJWT, getMinimalOverview);
 router.get('/wasteLast7Days', verifyJWT, getWasteLast7Days);
 router.get('/wasteTrendComparison', verifyJWT, getWasteTrendComparison);
+router.get('/diversionRate', verifyJWT, getDiversionRate);
 export default router;

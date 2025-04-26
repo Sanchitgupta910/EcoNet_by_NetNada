@@ -41,6 +41,6 @@ const invitationSchema = new mongoose.Schema({
   },
 });
 
-invitationSchema.index({ token: 1 });
+// invitationSchema.index({ token: 1 });
 
 export const Invitation = mongoose.model('Invitation', invitationSchema);

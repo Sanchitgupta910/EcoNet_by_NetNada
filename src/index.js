@@ -1,50 +1,82 @@
-import connectDB from "./db/index.js";
-import dotenv from "dotenv";
-import { app } from "./app.js";
-import { Server } from "socket.io";
+import connectDB from './db/index.js';
+import dotenv from 'dotenv';
+import { app } from './app.js';
+import { Server as IOServer } from 'socket.io';
 import http from 'http';
-
+import redisClient from './utils/redisClient.js';
 
 dotenv.config({
-    path: './.env'
-})
+  path: './.env',
+});
 
-// Import the MQTT subscriber so it starts running
-// require('./mqtt/mqttSubscriber');   //uncomment when required
-
-
-// Create an HTTP server from the Express app.
 const server = http.createServer(app);
-
-// Initialize Socket.io and attach it to the HTTP server.
-const io = new Server(server, {
-    cors: {
-        origin: process.env.CORS_ORIGIN,  // Update this as necessary for your environment.
-        methods: ["GET", "POST"],
-        credentials: true,
-    }
+const io = new IOServer(server, {
+  cors: { origin: process.env.CORS_ORIGIN, credentials: true },
+  path: '/socket.io',
+  transports: ['polling', 'websocket'],
 });
 
-// Listen for new client connections.
+// ─── Socket.io Connections ──────────────────────────────────────────────────────
 io.on('connection', (socket) => {
-    console.log(`Client connected: ${socket.id}`);
-    
-    socket.on('disconnect', () => {
-        console.log(`Client disconnected: ${socket.id}`);
-    });
+  const { branchId } = socket.handshake.query;
+  console.log('[WS] client connected:', socket.id, 'branchId=', branchId);
+  if (branchId) socket.join(branchId);
+
+  socket.on('disconnect', (reason) => {
+    console.log('[WS] client disconnected:', socket.id, 'reason=', reason);
+  });
 });
 
-// Attach the Socket.io instance to app.locals so that it's accessible in your routes/controllers.
-app.locals.io = io;
+// ─── Redis → Socket.io Bridge ────────────────────────────────────────────────────
+function setupRedisSubscriber() {
+  const sub = redisClient.duplicate();
 
-connectDB()  //function defined under db->index.js
+  sub.on('error', (err) => {
+    console.error('[Redis↪Socket] subscriber error', err);
+  });
+
+  // Subscribe once the duplicate connection is ready (it auto-connects)
+  sub.on('ready', () => {
+    console.log('✅ [Redis↪Socket] subscriber ready');
+    sub
+      .subscribe('waste-updates')
+      .then((count) =>
+        console.log(
+          `🎉 [Redis↪Socket] subscribed to "waste-updates" (${count} channel${
+            count > 1 ? 's' : ''
+          })`,
+        ),
+      )
+      .catch((err) => console.error('[Redis↪Socket] subscribe error', err));
+  });
+
+  sub.on('message', (channel, raw) => {
+    console.log(`[Redis↪Socket] message on "${channel}":`, raw);
+    try {
+      const { branchId, payload } = JSON.parse(raw);
+      if (branchId && payload) {
+        io.to(branchId).emit('wasteUpdate', payload);
+        console.log(`🔁 [Redis↪Socket] emitted wasteUpdate to room ${branchId}`, payload);
+      }
+    } catch (e) {
+      console.warn('[Redis↪Socket] invalid JSON:', e);
+    }
+  });
+}
+
+// ─── Bootstrapping ───────────────────────────────────────────────────────────────
+connectDB()
   .then(() => {
-    // Start the server with Socket.io
-    const PORT = process.env.PORT || 8000;
+    console.log('MongoDB Connected !!');
+
+    setupRedisSubscriber();
+
+    const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
-        console.log(`⚙️  Server running on port: ${PORT}`);
+      console.log(`🚀 HTTP+WS server listening on http://localhost:${PORT}`);
     });
   })
   .catch((err) => {
-    console.log("MongoDB Connection failed !!! ", err);
+    console.error('❌ startup failed:', err);
+    process.exit(1);
   });

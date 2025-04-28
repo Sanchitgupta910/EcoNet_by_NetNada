@@ -1,33 +1,88 @@
-const mqtt = require('mqtt');
-const axios = require('axios');
-// Import your MongoDB model or service for storing data
-const { storeInMongoDB } = require('./mqttStoreService'); // Example service function
+import mqtt from 'mqtt';
+import dotenv from 'dotenv';
+import { ingestWaste } from '../services/wasteService.js';
 
-// Connect to the MQTT broker
-const client = mqtt.connect('mqtt://your-broker-address');
+dotenv.config({
+  path: './.env',
+});
 
-client.on('connect', () => {
-  console.log("Connected to MQTT broker");
-  // Subscribe to a topic pattern; using + as a wildcard for bin IDs
-  client.subscribe('waste/bin/+/status', (err) => {
-    if (!err) {
-      console.log("Subscribed to bin status topics");
-    } else {
-      console.error("Subscription error:", err);
+// Required env vars
+const {
+  MQTT_BROKER_URL = process.env.MQTT_BROKER_URL,
+  MQTT_USERNAME = process.env.MQTT_USERNAME,
+  MQTT_PASSWORD = process.env.MQTT_PASSWORD,
+
+  MQTT_TOPIC = 'waste/weight/#', // default wildcard
+  MQTT_CLIENT_ID = `ecodash-sub_${Math.random().toString(16).slice(2)}`,
+  MQTT_RECONNECT_PERIOD = 5000, // 5s
+} = process.env;
+
+if (!MQTT_BROKER_URL) {
+  console.error('MQTT_BROKER_URL not set in .env');
+  process.exit(1);
+}
+
+// Build MQTT connection options
+const mqttOptions = {
+  clientId: MQTT_CLIENT_ID,
+  username: MQTT_USERNAME,
+  password: MQTT_PASSWORD,
+  reconnectPeriod: Number(MQTT_RECONNECT_PERIOD),
+  clean: false,
+  connectTimeout: 30_000,
+};
+
+/**
+ * startMqttSubscriber
+ * Connects to the MQTT broker and wires up message handling.
+ */
+export function startMqttSubscriber() {
+  console.log(`🔌 [MQTT] Connecting to ${MQTT_BROKER_URL} as ${MQTT_CLIENT_ID}`);
+  const client = mqtt.connect(MQTT_BROKER_URL, mqttOptions);
+
+  client.on('connect', () => {
+    console.log('✅ [MQTT] Connected');
+    client.subscribe(MQTT_TOPIC, { qos: 1 }, (err, granted) => {
+      if (err) {
+        console.error('[MQTT] Subscribe error:', err);
+      } else {
+        console.log(
+          `[MQTT] Subscribed to: ${granted.map(g => g.topic).join(', ')}`
+        );
+      }
+    });
+  });
+
+  client.on('reconnect', () => console.log('🔄 [MQTT] Reconnecting…'));
+  client.on('close', () => console.log('🔒 [MQTT] Connection closed'));
+  client.on('offline', () => console.warn('⚠️ [MQTT] Went offline'));
+  client.on('error', (err) => console.error('[MQTT] Error:', err));
+
+  client.on('message', async (topic, raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch (e) {
+      console.warn('⚠️ [MQTT] Invalid JSON:', raw.toString());
+      return;
+    }
+
+    const {
+      associateBin,
+      currentWeight,
+      eventType = 'disposal',
+      isCleaned = false,
+    } = msg;
+
+    if (!associateBin || typeof currentWeight !== 'number') {
+      console.warn('⚠️ [MQTT] Missing required fields:', msg);
+      return;
+    }
+
+    try {
+      await ingestWaste(associateBin, currentWeight, eventType, isCleaned);
+    } catch (err) {
+      console.error('[MQTT] ingestWaste() failed:', err);
     }
   });
-});
-
-client.on('message', (topic, message) => {
-  // Parse the message and modify the payload if needed
-  let payload = JSON.parse(message.toString());
-  
-  // Example modification: add a received timestamp
-  payload.receivedAt = new Date().toISOString();
-  
-  // Log and store the modified payload
-  console.log("Received MQTT message on", topic, ":", payload);
-  storeInMongoDB(topic, payload);
-});
-
-module.exports = client;
+}

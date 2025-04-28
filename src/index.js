@@ -4,6 +4,7 @@ import { app } from './app.js';
 import { Server as IOServer } from 'socket.io';
 import http from 'http';
 import redisClient from './utils/redisClient.js';
+import { startMqttSubscriber } from './MQTT/mqttSubscriber.js';
 
 dotenv.config({
   path: './.env',
@@ -70,6 +71,7 @@ connectDB()
     console.log('MongoDB Connected !!');
 
     setupRedisSubscriber();
+    startMqttSubscriber();
 
     const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {

@@ -16,10 +16,12 @@ const wasteSchema = new mongoose.Schema(
       type: String,
       enum: ['disposal', 'cleaning'],
       default: 'disposal',
+      required: true,
     },
     isCleaned: {
       type: Boolean,
       default: false,
+      required: true,
     },
   },
   { timestamps: true },

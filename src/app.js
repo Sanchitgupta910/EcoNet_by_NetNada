@@ -18,14 +18,14 @@ app.use(express.json({ limit: '16kb' }));
 app.use(express.urlencoded({ extended: true, limit: '16kb' }));
 app.use(cookieParser());
 
-app.use('/api/v1/company', CompanyRouter);
-app.use('/api/v1/address', AddressRouter);
-app.use('/api/v1/users', UserRouter);
-app.use('/api/v1/dustbin', DustbinRouter);
-app.use('/api/v1/waste', WasteRoute);
-app.use('/api/v1/analytics', AnalyticsRouter);
-app.use('/api/v1/orgUnits', OrgUnitRouter);
-app.use('/api/v1/binDashboardAnalytics', BinDashboardAnalyticsRouter);
-app.use('/api/v1/localAdminAnalytics', LocalAdminAnalyticsRouter);
+app.use('/NetNada/api/v1/company', CompanyRouter);
+app.use('/NetNada/api/v1/address', AddressRouter);
+app.use('/NetNada/api/v1/users', UserRouter);
+app.use('/NetNada/api/v1/dustbin', DustbinRouter);
+app.use('/NetNada/api/v1/waste', WasteRoute);
+app.use('/NetNada/api/v1/analytics', AnalyticsRouter);
+app.use('/NetNada/api/v1/orgUnits', OrgUnitRouter);
+app.use('/NetNada/api/v1/binDashboardAnalytics', BinDashboardAnalyticsRouter);
+app.use('/NetNada/api/v1/localAdminAnalytics', LocalAdminAnalyticsRouter);
 
 export { app };

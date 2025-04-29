@@ -8,9 +8,9 @@ dotenv.config({
 
 // Required env vars
 const {
-  MQTT_BROKER_URL = process.env.MQTT_BROKER_URL,
-  MQTT_USERNAME = process.env.MQTT_USERNAME,
-  MQTT_PASSWORD = process.env.MQTT_PASSWORD,
+  MQTT_BROKER_URL,
+  MQTT_USERNAME,
+  MQTT_PASSWORD,
 
   MQTT_TOPIC = 'waste/weight/#', // default wildcard
   MQTT_CLIENT_ID = `ecodash-sub_${Math.random().toString(16).slice(2)}`,
@@ -46,9 +46,7 @@ export function startMqttSubscriber() {
       if (err) {
         console.error('[MQTT] Subscribe error:', err);
       } else {
-        console.log(
-          `[MQTT] Subscribed to: ${granted.map(g => g.topic).join(', ')}`
-        );
+        console.log(`[MQTT] Subscribed to: ${granted.map((g) => g.topic).join(', ')}`);
       }
     });
   });
@@ -72,15 +70,22 @@ export function startMqttSubscriber() {
       currentWeight,
       eventType = 'disposal',
       isCleaned = false,
+      cleanedBy,
     } = msg;
 
-    if (!associateBin || typeof currentWeight !== 'number') {
+    if (!associateBin || typeof currentWeight !== 'number' || !eventType) {
       console.warn('⚠️ [MQTT] Missing required fields:', msg);
       return;
     }
 
     try {
-      await ingestWaste(associateBin, currentWeight, eventType, isCleaned);
+      await ingestWaste({
+        associateBin,
+        rawWeight: currentWeight,
+        eventType,
+        isCleaned: Boolean(isCleaned),
+        cleanedBy: cleanedBy || null,
+      });
     } catch (err) {
       console.error('[MQTT] ingestWaste() failed:', err);
     }

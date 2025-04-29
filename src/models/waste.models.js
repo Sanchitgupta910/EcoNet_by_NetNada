@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Dustbin } from './dustbin.models.js';
+import { Cleaner } from './cleaner.models.js';
 
 const wasteSchema = new mongoose.Schema(
   {
@@ -22,6 +23,13 @@ const wasteSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
       required: true,
+    },
+    cleanedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: Cleaner,
+      required: function () {
+        return this.eventType === 'cleaning';
+      },
     },
   },
   { timestamps: true },

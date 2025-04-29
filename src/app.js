@@ -11,6 +11,7 @@ import AnalyticsRouter from './routes/analytics.routes.js';
 import OrgUnitRouter from './routes/orgUnit.routes.js';
 import BinDashboardAnalyticsRouter from './routes/binDashboardAnalytics.routes.js';
 import LocalAdminAnalyticsRouter from './routes/LocalAdminAnalytics.routes.js';
+import CleanerRouter from './routes/cleaner.routes.js';
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || true, credentials: true }));
@@ -27,5 +28,6 @@ app.use('/NetNada/api/v1/analytics', AnalyticsRouter);
 app.use('/NetNada/api/v1/orgUnits', OrgUnitRouter);
 app.use('/NetNada/api/v1/binDashboardAnalytics', BinDashboardAnalyticsRouter);
 app.use('/NetNada/api/v1/localAdminAnalytics', LocalAdminAnalyticsRouter);
+app.use('/NetNada/api/v1/cleaners', CleanerRouter);
 
 export { app };

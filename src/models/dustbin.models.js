@@ -12,6 +12,12 @@ const dustbinSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    tareWeight: {
+      type: Number,
+      default: 0,
+      required: true,
+      description: 'Empty weight of the bin itself (kgs)',
+    },
     binCapacity: {
       type: Number,
       enum: [25, 50, 75],

@@ -103,4 +103,101 @@ const addWaste = asyncHandler(async (req, res) => {
   return res.status(201).json(new ApiResponse(201, wasteRecord, 'Waste record added successfully'));
 });
 
-export { addWaste };
+/**
+ * cleanBinsBulk
+ *
+ * Marks one or more bins as “cleaned” in one request.
+ * Steps:
+ *  1. Validate payload: must include an array of bins plus at least one identifier for the cleaner.
+ *  2. For each bin:
+ *     a. Load the Dustbin to ensure it exists and retrieve its branchAddress.
+ *     b. Update its tareWeight to the raw scale reading (so future disposals subtract correctly).
+ *     c. Save the bin.
+ *     d. Insert a Waste document with eventType='cleaning', currentWeight=0, isCleaned=true.
+ *     e. Publish the new Waste payload to Redis so any socket clients get the update in real time.
+ *  3. Return the array of created Waste records.
+ *
+ * @route POST /api/v1/waste/clean
+ * @access Service clients (via verifyServiceKey)
+ */
+const cleanBinsBulk = asyncHandler(async (req, res) => {
+  const { bins, cleanedBy, cleanerName } = req.body;
+
+  // 1) Validate top‐level payload
+  if (!Array.isArray(bins) || bins.length === 0 || !(cleanedBy || cleanerName)) {
+    throw new ApiError(
+      400,
+      'Payload must include a non-empty `bins` array and at least one of `cleanedBy` or `cleanerName`.',
+    );
+  }
+
+  const createdEvents = [];
+
+  // 2) Process each bin
+  for (const item of bins) {
+    const { associateBin, rawWeight } = item;
+
+    // 2.a) Validate each entry
+    if (!associateBin || typeof rawWeight !== 'number') {
+      // skip invalid entries rather than completely fail
+      console.warn(`[cleanBinsBulk] skipping invalid entry:`, item);
+      continue;
+    }
+
+    // 2.b) Load the Dustbin document
+    const bin = await Dustbin.findById(associateBin).lean();
+    if (!bin) {
+      console.warn(`[cleanBinsBulk] dustbin not found: ${associateBin}`);
+      continue;
+    }
+
+    // 2.c) Update its tareWeight
+    // (we assume you have added `tareWeight` to the Dustbin schema)
+    await Dustbin.updateOne({ _id: associateBin }, { $set: { tareWeight: rawWeight } });
+
+    // 2.d) Create a cleaning Waste record
+    const wasteRecord = await Waste.create({
+      associateBin,
+      currentWeight: 0, // cleaned → net waste is zero
+      eventType: 'cleaning',
+      isCleaned: true,
+      cleanedBy: cleanedBy || null,
+      cleanerName: cleanerName || null,
+    });
+
+    createdEvents.push(wasteRecord);
+
+    // 2.e) Publish to Redis for socket.io
+    const payload = {
+      _id: wasteRecord._id,
+      associateBin,
+      currentWeight: 0,
+      eventType: 'cleaning',
+      isCleaned: true,
+      cleanedBy: wasteRecord.cleanedBy,
+      cleanerName: wasteRecord.cleanerName,
+      createdAt: wasteRecord.createdAt,
+    };
+    const message = JSON.stringify({
+      branchId: bin.branchAddress.toString(),
+      payload,
+    });
+
+    redisClient
+      .publish('waste-updates', message)
+      .then(() => {
+        console.log(`[cleanBinsBulk] published cleaning event for bin ${associateBin}`);
+      })
+      .catch((err) => {
+        console.error(
+          `[cleanBinsBulk] failed to publish cleaning event for bin ${associateBin}:`,
+          err,
+        );
+      });
+  }
+
+  // 3) Return all successfully created events
+  return res.status(201).json(new ApiResponse(201, createdEvents, 'Bins cleaned successfully'));
+});
+
+export { addWaste, cleanBinsBulk };
